@@ -13,6 +13,7 @@ type UpgradeProButtonProps = {
   className?: string;
   style?: React.CSSProperties;
   onError?: (message: string) => void;
+  "data-testid"?: string;
 };
 
 export function UpgradeProButton({
@@ -22,6 +23,7 @@ export function UpgradeProButton({
   className = "button secondary",
   style,
   onError,
+  "data-testid": dataTestId,
 }: UpgradeProButtonProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -49,6 +51,7 @@ export function UpgradeProButton({
   return (
     <button
       className={className}
+      data-testid={dataTestId}
       disabled={isSubmitting}
       onClick={() => {
         void handleClick();

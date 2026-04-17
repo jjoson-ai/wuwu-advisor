@@ -70,6 +70,7 @@ export function GenerateForecastButton({
       >
         <button
           className="button"
+          data-testid="generate-forecast-btn"
           disabled={isSubmitting}
           onClick={handleClick}
           style={{ width: "100%" }}

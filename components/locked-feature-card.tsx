@@ -15,6 +15,7 @@ type LockedFeatureCardProps = {
   upgradeSurface?: string;
   bullets?: string[];
   featured?: boolean;
+  "data-testid"?: string;
 };
 
 export function LockedFeatureCard({
@@ -26,6 +27,7 @@ export function LockedFeatureCard({
   upgradeSurface,
   bullets,
   featured = false,
+  "data-testid": dataTestId,
 }: LockedFeatureCardProps) {
   useEffect(() => {
     if (feature == null || upgradeSurface == null) {
@@ -50,6 +52,7 @@ export function LockedFeatureCard({
   return (
     <div
       className={`card card-state card-state--locked stack${featured ? " card-featured" : ""}`}
+      data-testid={dataTestId}
     >
       <p className="card-eyebrow">{statusLabel}</p>
       <h2 className="card-title">{title}</h2>
@@ -112,6 +115,7 @@ export function LockedFeatureCard({
         ) : (
           <UpgradeProButton
             className={buttonClass}
+            data-testid={dataTestId ? `${dataTestId}-cta` : undefined}
             feature={feature}
             label={ctaLabel}
             upgradeSurface={upgradeSurface}

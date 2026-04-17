@@ -135,7 +135,7 @@ export default async function DashboardPage() {
         </div>
 
         {formattedBriefing === null ? (
-          <div className="card card-muted stack empty-state">
+          <div className="card card-muted stack empty-state" data-testid="today-empty-state">
             <p className="card-eyebrow">First read</p>
             <h2 className="card-title">Your first daily briefing is one click away</h2>
             <p className="card-subtitle">
@@ -188,7 +188,7 @@ export default async function DashboardPage() {
           ) : null}
 
           {/* Tier 2: Daily thesis (the big read) */}
-          <section className="card card-featured card-hero stack">
+          <section className="card card-featured card-hero stack" data-testid="today-briefing-content">
             <p className="card-eyebrow">Today&rsquo;s thesis</p>
             <div className="text-block">
               {renderParagraphs(

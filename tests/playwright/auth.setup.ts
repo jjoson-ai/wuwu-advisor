@@ -123,9 +123,10 @@ async function completeOnboardingIfNeeded(page: Page) {
 
   console.log("Onboarding detected. Filling the minimum smoke-test profile automatically.");
 
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible({
-    timeout: ONBOARDING_FORM_TIMEOUT_MS,
-  });
+  // New accounts show "Let's build your chart"; returning accounts show "Settings"
+  await expect(
+    page.getByRole("heading", { name: /Let's build your chart|Settings/i }),
+  ).toBeVisible({ timeout: ONBOARDING_FORM_TIMEOUT_MS });
 
   await page.getByLabel("Display name").fill(DEFAULT_SMOKE_ONBOARDING.displayName);
   await page

@@ -91,6 +91,7 @@ export default async function PricingPage() {
           ) : (
             <p
               className="muted"
+              data-testid="pricing-free-plan-label"
               style={{ margin: 0, fontSize: "0.88rem", textAlign: "center" }}
             >
               {isPro ? "Included in your Pro plan" : "Your current plan"}
@@ -152,6 +153,7 @@ export default async function PricingPage() {
             </p>
           ) : (
             <UpgradeProButton
+              data-testid="pricing-upgrade-btn"
               label="Upgrade to Pro"
               upgradeSurface="pricing_page"
               className="button"

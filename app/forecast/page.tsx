@@ -68,6 +68,7 @@ type ForecastDetailCardProps = {
   formatText: (text: string) => string;
   featured?: boolean;
   eyebrow?: string;
+  "data-testid"?: string;
 };
 
 function ForecastDetailCard({
@@ -77,12 +78,14 @@ function ForecastDetailCard({
   formatText,
   featured = false,
   eyebrow,
+  "data-testid": dataTestId,
 }: ForecastDetailCardProps) {
   const HeadingTag = featured ? "h2" : "h3";
 
   return (
     <div
       className={`card stack ${featured ? "card-featured card-hero" : "card-feature card-muted"}`}
+      data-testid={dataTestId}
       style={{ gap: featured ? "1rem" : "0.8rem" }}
     >
       {eyebrow ? <p className="card-eyebrow">{eyebrow}</p> : null}
@@ -200,7 +203,7 @@ export default async function ForecastPage() {
       {forecast === null ? null : (
         <div className="stack">
           {forecastNeedsRegeneration ? (
-            <div className="card card-state card-state--stale stack">
+            <div className="card card-state card-state--stale stack" data-testid="forecast-stale-card">
               <p className="card-eyebrow">Needs refresh</p>
               <h2 className="card-title">Refresh for your current tier</h2>
               <p className="card-subtitle">
@@ -246,6 +249,7 @@ export default async function ForecastPage() {
                 headline={forecast.current_phase.headline}
                 description={forecast.current_phase.description}
                 eyebrow="Planning lens"
+                data-testid="forecast-planning-lens"
                 featured
                 formatText={formatNumerologyMention}
               />
@@ -285,6 +289,7 @@ export default async function ForecastPage() {
             </div>
           ) : forecastNeedsRegeneration ? (
             <LockedFeatureCard
+              data-testid="forecast-stale-paywall"
               featured
               ctaLabel="Regenerate Forecast"
               description="This Forecast was generated at the free tier. Regenerate it to load the fuller planning depth now included in your plan."
@@ -294,6 +299,7 @@ export default async function ForecastPage() {
             />
           ) : (
             <LockedFeatureCard
+              data-testid="forecast-upgrade-paywall"
               featured
               ctaLabel="Upgrade to Pro"
               description="Pro unlocks the deeper planning sections — so each month's guidance gets measurably more specific to where your effort belongs."

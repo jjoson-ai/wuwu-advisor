@@ -119,6 +119,7 @@ export function GenerateBriefingButton({
       >
         <button
           className="button"
+          data-testid="generate-briefing-btn"
           disabled={isSubmitting}
           onClick={handleClick}
           style={{ width: "100%" }}
