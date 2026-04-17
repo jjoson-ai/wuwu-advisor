@@ -1,0 +1,24 @@
+{
+  "updated_at": "2026-04-17",
+  "source_note": "Operator-maintained pricing snapshot for bake-off cost estimation. Update this file when vendor pricing changes. All models are Anthropic. Verify current pricing at https://www.anthropic.com/pricing before relying on these figures.",
+  "models": {
+    "claude-haiku-4-5-20251001": {
+      "input_per_1m_usd": 0.8,
+      "output_per_1m_usd": 4.0,
+      "source_url": "https://www.anthropic.com/pricing",
+      "notes": "Haiku 4.5 — extract pass (signal generation). Verify current pricing."
+    },
+    "claude-sonnet-4-6": {
+      "input_per_1m_usd": 3,
+      "output_per_1m_usd": 15,
+      "source_url": "https://www.anthropic.com/pricing",
+      "notes": "Sonnet 4.6 — compose pass (simple narrative). Verify current pricing."
+    },
+    "claude-opus-4-7": {
+      "input_per_1m_usd": 15,
+      "output_per_1m_usd": 75,
+      "source_url": "https://www.anthropic.com/pricing",
+      "notes": "Opus 4.7 — synthesize pass (final user-facing output, blueprint). Verify current pricing."
+    }
+  }
+}

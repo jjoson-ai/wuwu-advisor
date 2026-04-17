@@ -1,0 +1,32 @@
+appId: com.astrologerondemand.app
+---
+- openLink: "astrologerondemand://onboarding"
+
+- runFlow:
+    when:
+      visible: "Use test account"
+    commands:
+      - tapOn: "Use test account"
+
+- runFlow:
+    when:
+      visible: "Complete your settings"
+    commands:
+      - tapOn: "Display name"
+      - inputText: "Smoke Test User"
+      - tapOn: "Full birth name for numerology"
+      - inputText: "Smoke Test User"
+      - tapOn: "Birth date"
+      - inputText: "1986-02-19"
+      - tapOn: "04:00"
+      - tapOn: "Birth city"
+      - inputText: "Madrid"
+      - scrollUntilVisible:
+          element:
+            text: "Birth country"
+      - tapOn: "Birth country"
+      - inputText: "Spain"
+      - scrollUntilVisible:
+          element:
+            text: "Save and continue"
+      - tapOn: "Save and continue"

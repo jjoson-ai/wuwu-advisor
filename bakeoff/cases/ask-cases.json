@@ -1,0 +1,182 @@
+[
+  {
+    "id": "ask-01",
+    "label": "Career role switch with timing pressure",
+    "profile_case_id": "profile-01",
+    "tier": "pro",
+    "question": "Should I accept the staff product role now, or stay one more quarter where I am and negotiate from a stronger position later?",
+    "tags": ["career", "timing", "uncertainty"],
+    "notes": "High-intent career tradeoff with timing and leverage."
+  },
+  {
+    "id": "ask-02",
+    "label": "Relationship conversation after repeated friction",
+    "profile_case_id": "profile-03",
+    "tier": "pro",
+    "question": "Should I bring up the mismatch I keep feeling in my relationship this week, or give it more space first so the conversation does not turn defensive?",
+    "tags": ["relationship", "timing", "uncertainty"],
+    "notes": "Tests emotional nuance, stance clarity, and conversation setup."
+  },
+  {
+    "id": "ask-03",
+    "label": "Hiring vs conserving cash",
+    "profile_case_id": "profile-18",
+    "tier": "pro",
+    "question": "Do I hire the growth operator now, or keep the team lean until we have two more months of cleaner conversion data?",
+    "tags": ["career", "money", "uncertainty"],
+    "notes": "Operator-style business decision with reversible vs irreversible framing."
+  },
+  {
+    "id": "ask-04",
+    "label": "Should I make the first move after distance",
+    "profile_case_id": "profile-11",
+    "tier": "free",
+    "question": "Should I text first after this week of distance, or wait and see whether they come toward me without being prompted?",
+    "tags": ["relationship", "timing"],
+    "notes": "Free Ask case; needs direct stance without generic reassurance."
+  },
+  {
+    "id": "ask-05",
+    "label": "Quarterly launch timing",
+    "profile_case_id": "profile-14",
+    "tier": "pro",
+    "question": "Is this the right quarter to launch the premium analytics add-on, or should I keep the funnel steady and test pricing quietly first?",
+    "tags": ["career", "timing", "uncertainty"],
+    "notes": "High-intent business/product case."
+  },
+  {
+    "id": "ask-06",
+    "label": "Moving in together decision",
+    "profile_case_id": "profile-15",
+    "tier": "pro",
+    "question": "Should we move in together this summer, or is the relationship still asking for more clarity before we make that commitment?",
+    "tags": ["relationship", "timing", "uncertainty"],
+    "notes": "Needs clarity on commitment pace."
+  },
+  {
+    "id": "ask-07",
+    "label": "Consulting retainer pricing",
+    "profile_case_id": "profile-17",
+    "tier": "pro",
+    "question": "Should I raise my retainer now with the new client, or hold the current rate until I have delivered one stronger cycle of results?",
+    "tags": ["career", "money", "timing"],
+    "notes": "Tests stance on negotiation timing."
+  },
+  {
+    "id": "ask-08",
+    "label": "Fund allocation sizing decision",
+    "profile_case_id": "profile-05",
+    "tier": "pro",
+    "question": "Do I put a full allocation into this fund now, or take a smaller first position and wait for one more signal before adding?",
+    "tags": ["money", "timing", "uncertainty"],
+    "notes": "Sizing decision; should not collapse into vague caution."
+  },
+  {
+    "id": "ask-09",
+    "label": "Should I ask for the promotion now",
+    "profile_case_id": "profile-06",
+    "tier": "free",
+    "question": "Should I ask for the promotion now, or spend another month making the case more undeniable before I bring it up?",
+    "tags": ["career", "timing"],
+    "notes": "Free Ask case; should still feel sharp."
+  },
+  {
+    "id": "ask-10",
+    "label": "Fertility and family planning conversation",
+    "profile_case_id": "profile-20",
+    "tier": "pro",
+    "question": "Should we have the harder family-planning conversation now, or would it go better if I wait until work pressure calms down first?",
+    "tags": ["relationship", "timing", "uncertainty"],
+    "notes": "High-stakes personal timing conversation."
+  },
+  {
+    "id": "ask-11",
+    "label": "Quit and build full-time or keep consulting",
+    "profile_case_id": "profile-09",
+    "tier": "pro",
+    "question": "Should I leave consulting and build the product full-time now, or keep the consulting cash flow while I validate two more assumptions?",
+    "tags": ["career", "money", "uncertainty"],
+    "notes": "Founder-style irreversible move."
+  },
+  {
+    "id": "ask-12",
+    "label": "Send the apology message now or later",
+    "profile_case_id": "profile-08",
+    "tier": "free",
+    "question": "Should I send the apology message tonight, or wait until there is less emotional charge and more space for it to land properly?",
+    "tags": ["relationship", "timing"],
+    "notes": "Free Ask conversation-timing case."
+  },
+  {
+    "id": "ask-13",
+    "label": "Reprice annual plan or not yet",
+    "profile_case_id": "profile-10",
+    "tier": "pro",
+    "question": "Is this the right moment to reprice the annual plan, or should I leave pricing alone and focus on tightening onboarding first?",
+    "tags": ["career", "timing", "uncertainty"],
+    "notes": "Operator sequencing question."
+  },
+  {
+    "id": "ask-14",
+    "label": "Stay in the city or relocate",
+    "profile_case_id": "profile-04",
+    "tier": "pro",
+    "question": "Should I stay in this city another year, or start actively planning a move even if the exact next place is not settled yet?",
+    "tags": ["uncertainty", "timing", "personal-life"],
+    "notes": "Open-ended but high-intent life direction question."
+  },
+  {
+    "id": "ask-15",
+    "label": "Reopen the old relationship or let it go",
+    "profile_case_id": "profile-13",
+    "tier": "pro",
+    "question": "Should I reopen the connection with my ex now that they reached out, or is this more likely to reopen confusion than create something clean?",
+    "tags": ["relationship", "uncertainty"],
+    "notes": "Tests sharpness vs emotional sludge."
+  },
+  {
+    "id": "ask-16",
+    "label": "Make the angel investment now",
+    "profile_case_id": "profile-02",
+    "tier": "pro",
+    "question": "Should I make the angel investment now, or hold back until I have better downside clarity even if that means missing the current round?",
+    "tags": ["money", "uncertainty", "timing"],
+    "notes": "Investment sizing/timing case."
+  },
+  {
+    "id": "ask-17",
+    "label": "Push the hard feedback or pace it",
+    "profile_case_id": "profile-07",
+    "tier": "free",
+    "question": "Should I give the tough feedback to my cofounder now, or soften the timing so it lands without turning into a fight?",
+    "tags": ["career", "relationship", "timing"],
+    "notes": "Free Ask case with work-relationship overlap."
+  },
+  {
+    "id": "ask-18",
+    "label": "Take the media opportunity or stay quiet",
+    "profile_case_id": "profile-12",
+    "tier": "pro",
+    "question": "Should I take the media opportunity this month, or is it smarter to stay quiet and finish the underlying work before becoming more visible?",
+    "tags": ["career", "timing", "uncertainty"],
+    "notes": "Visibility vs readiness tradeoff."
+  },
+  {
+    "id": "ask-19",
+    "label": "Pause the wedding planning",
+    "profile_case_id": "profile-16",
+    "tier": "pro",
+    "question": "Should we pause the wedding planning until the money picture feels calmer, or keep moving and adjust the scope instead of delaying the whole decision?",
+    "tags": ["relationship", "money", "uncertainty"],
+    "notes": "Commitment sizing and pace question."
+  },
+  {
+    "id": "ask-20",
+    "label": "Bet on the new market or stay focused",
+    "profile_case_id": "profile-19",
+    "tier": "pro",
+    "question": "Should I expand into the new market this quarter, or keep the current market focused until the team is less stretched and the signal is cleaner?",
+    "tags": ["career", "timing", "uncertainty"],
+    "notes": "Hard strategic expansion call for premium Ask."
+  }
+]

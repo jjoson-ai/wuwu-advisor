@@ -1,0 +1,6 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://ask"
+- tapOn: "Pro"
+- assertVisible: "Ask again for your current tier"

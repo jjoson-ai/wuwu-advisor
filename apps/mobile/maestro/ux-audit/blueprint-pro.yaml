@@ -1,0 +1,15 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://blueprint"
+- tapOn: "Pro"
+- assertVisible: "Overview"
+- scrollUntilVisible:
+    element: "Chinese signature"
+    direction: DOWN
+- assertVisible: "Chinese signature"
+- scrollUntilVisible:
+    element: "How you handle pressure"
+    direction: DOWN
+    visibilityPercentage: 30
+- assertVisible: "How you handle pressure"

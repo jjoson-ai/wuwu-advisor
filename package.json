@@ -1,0 +1,35 @@
+{
+  "name": "astrologer-on-demand",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "bakeoff:run": "tsx scripts/bakeoff/run.ts",
+    "bakeoff:report": "tsx scripts/bakeoff/report.ts",
+    "test:smoke:auth": "playwright test tests/playwright/auth.setup.ts --project=setup --headed",
+    "test:smoke:checkout": "playwright test tests/playwright/checkout.smoke.spec.ts --project=chromium-smoke --headed",
+    "test:ux:capture": "WUWU_AUDIT_RUN_ID=${WUWU_AUDIT_RUN_ID:-$(date +%Y%m%d-%H%M%S)} playwright test tests/playwright/ux-audit.capture.spec.ts --project=chromium-audit --project=iphone-audit --headed"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.49.4",
+    "astronomy-engine": "^2.1.19",
+    "next": "^15.2.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "server-only": "^0.0.1",
+    "stripe": "^20.4.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^22.13.14",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.2"
+  }
+}

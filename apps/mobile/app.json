@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Astrologer On Demand",
+    "slug": "astrologer-on-demand",
+    "scheme": "astrologerondemand",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "plugins": ["expo-router"],
+    "android": {
+      "package": "com.astrologerondemand.app"
+    },
+    "ios": {
+      "bundleIdentifier": "com.astrologerondemand.app"
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

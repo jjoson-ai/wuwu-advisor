@@ -1,0 +1,10 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://forecast"
+- tapOn: "Free"
+- scrollUntilVisible:
+    element: "Upgrade to Pro"
+    direction: DOWN
+- assertVisible: "Unlock your full Forecast"
+- assertVisible: "Upgrade to Pro"

@@ -1,0 +1,11 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://forecast"
+- tapOn: "Pro"
+- assertVisible: "What’s unfolding this month"
+- scrollUntilVisible:
+    element: "Current phase"
+    direction: DOWN
+    visibilityPercentage: 30
+- assertVisible: "Current phase"

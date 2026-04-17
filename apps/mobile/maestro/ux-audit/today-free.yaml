@@ -1,0 +1,7 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://today"
+- assertVisible: "Today"
+- tapOn: "Free"
+- assertVisible: "Summary"

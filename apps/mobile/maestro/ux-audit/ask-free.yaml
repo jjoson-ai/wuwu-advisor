@@ -1,0 +1,12 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://ask"
+- tapOn: "Free"
+- scrollUntilVisible:
+    element: "Direct answer"
+    direction: DOWN
+- assertVisible: "Direct answer"
+- scrollUntilVisible:
+    element: "What matters most"
+    direction: DOWN

@@ -1,0 +1,6 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://blueprint"
+- tapOn: "Pro"
+- assertVisible: "Refresh for your current tier"

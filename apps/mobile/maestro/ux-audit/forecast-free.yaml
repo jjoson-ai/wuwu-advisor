@@ -1,0 +1,6 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://forecast"
+- tapOn: "Free"
+- assertVisible: "What’s unfolding this month"

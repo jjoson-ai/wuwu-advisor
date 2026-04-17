@@ -1,0 +1,11 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://today"
+- tapOn: "Pro"
+- assertVisible: "Summary"
+- scrollUntilVisible:
+    element: "BE CAREFUL WITH"
+    direction: DOWN
+    visibilityPercentage: 30
+- assertVisible: "BE CAREFUL WITH"

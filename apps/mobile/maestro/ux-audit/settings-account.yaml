@@ -1,0 +1,13 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://settings"
+- assertVisible: "Settings"
+- scrollUntilVisible:
+    element: "Save settings"
+    direction: DOWN
+- assertVisible: "Save settings"
+- scrollUntilVisible:
+    element: "Sign out"
+    direction: DOWN
+- assertVisible: "Sign out"

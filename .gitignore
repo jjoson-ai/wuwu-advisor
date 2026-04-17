@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.expo/
+
+# Next.js build output
+.next/
+out/
+
+# Environment secrets — never commit these
+.env.local
+.env.*.local
+apps/mobile/.env
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+apps/mobile/tsconfig.tsbuildinfo
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Test/CI artifacts
+playwright/.auth/
+playwright-report/
+test-results/
+audit-artifacts/
+
+# Bakeoff outputs
+bakeoff/outputs/
+bakeoff/judgments/
+bakeoff/reports/

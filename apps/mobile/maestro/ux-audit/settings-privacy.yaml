@@ -1,0 +1,14 @@
+appId: com.astrologerondemand.app
+---
+- runFlow: _auth-if-needed.yaml
+- openLink: "astrologerondemand://settings"
+- scrollUntilVisible:
+    element: "Privacy & data"
+    direction: DOWN
+- assertVisible: "Privacy & data"
+- assertVisible: "Privacy Policy"
+- scrollUntilVisible:
+    element: "Download my data"
+    direction: DOWN
+- assertVisible: "Download my data"
+- assertVisible: "Delete my data"
