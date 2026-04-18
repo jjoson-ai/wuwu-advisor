@@ -1,6 +1,6 @@
 import {
-  FinalSynthesisOutputSchema,
-  type FinalSynthesisOutput,
+  BriefingOutputSchema,
+  type BriefingOutput,
 } from "@/domain/astrology/schemas";
 import type {
   DailyBriefingRow,
@@ -8,8 +8,8 @@ import type {
 } from "@/domain/briefing/briefing.types";
 import { sanitizeForbiddenInternalTermsInUserOutput } from "@/lib/output-safety";
 
-function parseSynthesisPayload(payload: unknown): FinalSynthesisOutput {
-  const output = FinalSynthesisOutputSchema.parse(payload);
+function parseSynthesisPayload(payload: unknown): BriefingOutput {
+  const output = BriefingOutputSchema.parse(payload);
   return sanitizeForbiddenInternalTermsInUserOutput(output);
 }
 
@@ -27,6 +27,7 @@ export function formatBriefingForDashboard(
     cards: synthesis.cards,
     timing: synthesis.timing,
     micro_claim: synthesis.micro_claim,
+    systems_agreement: synthesis.systems_agreement,
     generation_access_level: briefing.generation_access_level,
     created_at: briefing.created_at,
   };

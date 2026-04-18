@@ -3,7 +3,7 @@ import "server-only";
 
 import { PostgrestError } from "@supabase/supabase-js";
 
-import type { FinalSynthesisOutput } from "@/domain/astrology/schemas";
+import type { BriefingOutput } from "@/domain/astrology/schemas";
 import type { DailyBriefingRow } from "@/domain/briefing/briefing.types";
 import type { NumerologyGenerationData } from "@/domain/numerology/numerology.agent";
 import type { FreeAstroDailyContext } from "@/lib/freeastroapi";
@@ -82,7 +82,7 @@ export async function upsertDailyBriefing(params: {
   freeAstroContext: FreeAstroDailyContext;
   westernPayload: unknown;
   timingPayload: unknown;
-  synthesisPayload: FinalSynthesisOutput;
+  synthesisPayload: BriefingOutput;
   generationAccessLevel: AccessLevel;
 }) {
   const supabase = await getSupabaseServerClient(params.accessToken ?? undefined);

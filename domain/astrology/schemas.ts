@@ -139,3 +139,14 @@ export const FinalSynthesisOutputSchema = z.object({
 });
 
 export type FinalSynthesisOutput = z.infer<typeof FinalSynthesisOutputSchema>;
+
+/**
+ * Storage / display schema — extends FinalSynthesisOutput with fields that are
+ * computed outside the LLM (injected by the route after the two-pass run).
+ * Never used as the structured-output schema sent to the model.
+ */
+export const BriefingOutputSchema = FinalSynthesisOutputSchema.extend({
+  systems_agreement: z.string().nullable().optional(),
+});
+
+export type BriefingOutput = z.infer<typeof BriefingOutputSchema>;

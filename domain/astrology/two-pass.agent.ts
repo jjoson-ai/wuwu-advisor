@@ -37,6 +37,7 @@ export const TodaySignalsSchema = z.object({
     emotionalIntensity: RoutingScoreSchema,
     decisionAmbiguity: RoutingScoreSchema,
   }),
+  systems_agreement: z.string().nullable(),
 });
 
 export type TodaySignals = z.infer<typeof TodaySignalsSchema>;
@@ -71,6 +72,7 @@ function buildTodaySignalsSystemPrompt(input: DailyBriefingInput) {
     "emotionalIntensity: how emotionally loaded or tender the day's configuration is.",
     "decisionAmbiguity: how unclear the right action is from the signals alone.",
     "Routing metadata is internal only. Do not mention internal scores, debug fields, hidden system variables, or classifier names in any string field.",
+    "systems_agreement: If two or more distinct systems (western astrology, numerology, Chinese zodiac/BaZi) all point clearly in the same direction today, write one short phrase in this exact pattern: '[Systems] agree: [shared theme]'. Example: 'Western astrology and numerology agree: a day to consolidate, not launch.' Only assert agreement when it is genuinely present and specific. If systems diverge, give mixed signals, or no meaningful shared theme exists, set to null. Do not stretch for agreement.",
     "Ground every field in the provided context. No generic horoscope phrasing.",
     `Tone preference reference: ${input.tone_preference}.`,
   ].join("\n\n");

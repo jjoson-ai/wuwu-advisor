@@ -1,6 +1,6 @@
 import type { AccessLevel } from "@/lib/access";
 import type { AstrologyContext } from "@/domain/astrology/context";
-import type { FinalSynthesisOutput } from "@/domain/astrology/schemas";
+import type { BriefingOutput, FinalSynthesisOutput } from "@/domain/astrology/schemas";
 import type { NumerologyGenerationData } from "@/domain/numerology/numerology.agent";
 import type { FreeAstroDailyContext } from "@/lib/freeastroapi";
 
@@ -13,7 +13,7 @@ export type DailyBriefingRow = {
   freeastro_context_json: FreeAstroDailyContext | null;
   western_payload_json: unknown;
   timing_payload_json: unknown;
-  synthesis_payload_json: FinalSynthesisOutput;
+  synthesis_payload_json: BriefingOutput;
   generation_access_level: AccessLevel | null;
   created_at: string;
 };
@@ -27,6 +27,7 @@ export type FormattedDailyBriefing = {
   cards: FinalSynthesisOutput["cards"];
   timing: FinalSynthesisOutput["timing"];
   micro_claim: FinalSynthesisOutput["micro_claim"];
+  systems_agreement: string | null | undefined;
   generation_access_level: AccessLevel | null;
   created_at: string;
 };

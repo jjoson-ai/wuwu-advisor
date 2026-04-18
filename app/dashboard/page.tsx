@@ -22,7 +22,7 @@ import {
   getOnboardingRecord,
   isOnboardingComplete,
 } from "@/domain/profile/profile.service";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, isAgeVerified } from "@/lib/auth";
 import { GenerateBriefingButton } from "@/components/generate-briefing-button";
 import { getServerAccessState } from "@/lib/debug-access";
 import { isArtifactStaleForCurrentAccess } from "@/lib/access";
@@ -81,6 +81,10 @@ export default async function DashboardPage() {
 
   if (user === null) {
     redirect("/login");
+  }
+
+  if (!isAgeVerified(user)) {
+    redirect("/age-gate?next=/dashboard");
   }
 
   const record = await getOnboardingRecord(user.id);
@@ -185,6 +189,16 @@ export default async function DashboardPage() {
                 to recompute it for your current tier.
               </p>
             </div>
+          ) : null}
+
+          {/* Concordance badge — only shown when signals from multiple systems agree */}
+          {formattedBriefing.systems_agreement ? (
+            <section className="card card-muted" data-testid="today-concordance">
+              <p className="card-eyebrow">Systems align</p>
+              <p style={{ margin: 0, fontSize: "0.95rem", lineHeight: 1.55 }}>
+                {formattedBriefing.systems_agreement}
+              </p>
+            </section>
           ) : null}
 
           {/* Tier 2: Daily thesis (the big read) */}
@@ -320,7 +334,7 @@ export default async function DashboardPage() {
                 <UpgradeProButton
                   className="button"
                   feature="blueprint"
-                  label="Upgrade to Pro"
+                  label="Start 3-day free trial"
                   upgradeSurface="today_blueprint_nudge"
                 />
               </div>

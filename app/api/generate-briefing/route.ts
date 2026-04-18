@@ -20,7 +20,7 @@ import {
 } from "@/domain/astrology/timing.agent";
 import {
   DailyBriefingInputSchema,
-  type FinalSynthesisOutput,
+  type BriefingOutput,
   type DailyBriefingInput,
 } from "@/domain/astrology/schemas";
 import {
@@ -355,7 +355,7 @@ export async function POST(request: Request) {
 
         let westernPayload: unknown;
         let timingPayload: unknown;
-        let synthesisOutput: FinalSynthesisOutput;
+        let synthesisOutput: BriefingOutput;
         let routingDecision: ReturnType<typeof getModelRoutingDecision> | null = null;
         let fallbackReason: string | null = null;
         let requestCostEstimateUsd: number | null = null;
@@ -437,7 +437,10 @@ export async function POST(request: Request) {
             tier: accessState.accessLevel,
             requestId,
           });
-          synthesisOutput = narrativeResult.data;
+          synthesisOutput = {
+            ...narrativeResult.data,
+            systems_agreement: signals.systems_agreement ?? null,
+          };
           requestCostEstimateUsd = sumEstimatedCosts([
             signalsResult.estimatedCostUsd,
             narrativeResult.estimatedCostUsd,
