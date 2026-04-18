@@ -1,5 +1,3 @@
-import { redirect } from "next/navigation";
-
 import {
   getOperatorDashboardData,
   type DashboardFilters,
@@ -9,8 +7,6 @@ import {
   type DashboardTierFilter,
   type DashboardTimeWindow,
 } from "@/domain/ops/dashboard.service";
-import { getCurrentUser } from "@/lib/auth";
-import { getServerAccessState } from "@/lib/debug-access";
 
 function readEnumValue<T extends string>(
   value: string | string[] | undefined,
@@ -197,18 +193,6 @@ export default async function OpsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const user = await getCurrentUser();
-
-  if (user === null) {
-    redirect("/login");
-  }
-
-  const accessState = await getServerAccessState(user);
-
-  if (accessState.accessLevel !== "internal") {
-    redirect("/dashboard");
-  }
-
   const filters = buildFilters(await searchParams);
   const dashboard = await getOperatorDashboardData(filters);
 
@@ -307,6 +291,7 @@ export default async function OpsPage({
             display: "flex",
             flexWrap: "wrap",
             gap: "0.75rem",
+            alignItems: "center",
           }}
         >
           <StatusBadge status="live" />
@@ -315,6 +300,9 @@ export default async function OpsPage({
           <p className="muted" style={{ margin: 0 }}>
             Window: {dashboard.windowLabel}
           </p>
+          <a href="/ops/funnel" style={{ fontSize: "0.85rem", marginLeft: "auto" }}>
+            Funnel &amp; retention →
+          </a>
         </div>
       </section>
 

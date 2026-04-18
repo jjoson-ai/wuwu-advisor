@@ -6,6 +6,12 @@ import {
   parseAttributionCookie,
   serializeAttributionCookie,
 } from "@/lib/paid-media";
+import { isOpsSessionValid, OPS_AUTH_COOKIE } from "@/lib/ops-auth";
+
+/** Paths under /ops that don't require an ops session */
+const OPS_PUBLIC_PATHS = ["/ops/login"];
+/** API routes that don't require an ops session (the auth endpoint itself) */
+const OPS_AUTH_API_PATH = "/api/ops/auth";
 
 function getQueryValue(url: URL, key: string) {
   const value = url.searchParams.get(key);
@@ -19,6 +25,24 @@ function getQueryValue(url: URL, key: string) {
 }
 
 export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Ops dashboard — password-only gate, no Supabase session required
+  const isOpsPath =
+    pathname.startsWith("/ops") || pathname.startsWith("/api/ops");
+  const isOpsPublic =
+    OPS_PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/")) ||
+    pathname === OPS_AUTH_API_PATH ||
+    pathname.startsWith(OPS_AUTH_API_PATH + "/");
+
+  if (isOpsPath && !isOpsPublic) {
+    const cookieValue = request.cookies.get(OPS_AUTH_COOKIE)?.value;
+    if (!isOpsSessionValid(cookieValue)) {
+      const loginUrl = new URL("/ops/login", request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
   const response = NextResponse.next();
   const currentValue = request.cookies.get(ATTRIBUTION_COOKIE)?.value;
   const existing = parseAttributionCookie(currentValue) ?? {
