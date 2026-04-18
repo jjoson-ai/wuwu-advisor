@@ -7,7 +7,9 @@ export type BakeoffVariantId =
   | "variant-a"
   | "variant-b"
   | "variant-c"
-  | "variant-d";
+  | "variant-d"
+  | "variant-e"
+  | "variant-f";
 
 export type BakeoffProfile = {
   display_name: string;

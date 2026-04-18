@@ -125,6 +125,7 @@ const pricingTable = pricingJson as PricingTable;
 type StructuredRequest = {
   systemPrompt: string;
   userPrompt: string;
+  cachedSystemBlock?: string;
   schemaName: string;
   schema: Record<string, unknown>;
   maxOutputTokens: number;
@@ -208,6 +209,7 @@ function parseArgs() {
 function structuredRequestFromAgentRequest(request: {
   systemPrompt: string;
   userPrompt: string;
+  cachedSystemBlock?: string;
   schemaName: string;
   structuredOutput?: { schema: Record<string, unknown> };
   outputSchema?: object;
@@ -216,6 +218,7 @@ function structuredRequestFromAgentRequest(request: {
   return {
     systemPrompt: request.systemPrompt,
     userPrompt: request.userPrompt,
+    cachedSystemBlock: request.cachedSystemBlock,
     schemaName: request.schemaName,
     schema:
       request.structuredOutput?.schema ??
@@ -469,6 +472,7 @@ async function runStructuredStage<T>(params: {
       model: params.model.model,
       systemPrompt: params.request.systemPrompt,
       userPrompt: params.request.userPrompt,
+      cachedSystemBlock: params.request.cachedSystemBlock,
       schemaName: params.request.schemaName,
       schema: params.request.schema,
       maxOutputTokens: params.request.maxOutputTokens,
@@ -807,7 +811,11 @@ async function runTodayCase(
   variantLabel: string,
   plan: SurfacePlan,
 ) {
+  const caseTag = `${profileCase.id}|${tier}|${variantId}`;
   const shared = buildSharedProfileRuntime(profileCase, tier);
+  if (tier === "pro") {
+    console.log(`[bakeoff:${caseTag}] freeastro: fetching`);
+  }
   shared.freeAstroDailyContext =
     tier === "pro"
       ? await buildFreeAstroDailyContext({
@@ -823,6 +831,9 @@ async function runTodayCase(
           notes: [],
           limitations: [],
         };
+  if (tier === "pro") {
+    console.log(`[bakeoff:${caseTag}] freeastro: done`);
+  }
   const stages: BakeoffStageResult[] = [];
   const signalsModel =
     plan.mode === "production_control" ? plan.cheap_model! : plan.primary_model!;
@@ -839,6 +850,7 @@ async function runTodayCase(
     freeAstroDailyContext: todayCtx.freeAstroDailyContext,
     blueprintContext: todayCtx.blueprintContext,
   });
+  console.log(`[bakeoff:${caseTag}] signals: calling ${signalsModel.model}`);
   const signalsResult = await runStructuredStage({
     stageId: "signals",
     label: "Signals",
@@ -847,6 +859,7 @@ async function runTodayCase(
     validate: (parsedJson) => TodaySignalsSchema.parse(parsedJson),
     stepName: `${signalsModel.model} today signals`,
   });
+  console.log(`[bakeoff:${caseTag}] signals: ${signalsResult.stage.status}`);
   stages.push(signalsResult.stage);
   const routingMetadata =
     signalsResult.output == null
@@ -889,6 +902,7 @@ async function runTodayCase(
       },
       plan.mode === "production_control" && routingMetadata?.use_frontier ? "synthesize" : "compose",
     );
+    console.log(`[bakeoff:${caseTag}] narrative: calling ${narrativeModel.model} (${plan.mode === "production_control" && routingMetadata?.use_frontier ? "synthesize" : "compose"})`);
     const narrativeResult = await runStructuredStage({
       stageId: "narrative",
       label: "Narrative",
@@ -897,6 +911,7 @@ async function runTodayCase(
       validate: validateFinalSynthesisOutput,
       stepName: `${narrativeModel.model} today narrative`,
     });
+    console.log(`[bakeoff:${caseTag}] narrative: ${narrativeResult.stage.status}`);
     stages.push(narrativeResult.stage);
 
     if (narrativeResult.output != null) {
@@ -1610,6 +1625,7 @@ async function main() {
       for (const tier of profileCase.tiers) {
         for (const variant of selectedVariants) {
           const plan = variant.getSurfacePlan(surface, tier);
+          console.log(`[bakeoff] ${surface} | ${profileCase.id} | ${tier} | ${variant.id} — starting`);
           const result =
             surface === "today"
               ? await runTodayCase(config.runId, profileCase, tier, variant.id, variant.label, plan)
@@ -1618,6 +1634,7 @@ async function main() {
                 : await runBlueprintCase(config.runId, profileCase, tier, variant.id, variant.label, plan);
           results.push(result);
           await writeCandidateArtifacts(runRoot, result);
+          console.log(`[bakeoff] ${surface} | ${profileCase.id} | ${tier} | ${variant.id} — done (${result.status})`);
         }
       }
     }

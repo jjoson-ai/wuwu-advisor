@@ -33,9 +33,20 @@ import {
   getOnboardingRecord,
   isOnboardingComplete,
 } from "@/domain/profile/profile.service";
+import { detectCrisisOutput } from "@/domain/safety/crisis-detection";
+import { logCrisisDetected } from "@/domain/safety/crisis-log";
+import {
+  classifyOutputSafety,
+  type SafetyClassifyContext,
+} from "@/domain/safety/output-safety";
+import {
+  logOutputSafetyBlocked,
+  logOutputSafetyFlagged,
+} from "@/domain/safety/output-safety-log";
 import { getRequestAuth } from "@/lib/auth";
 import { getRequestAccessState } from "@/lib/debug-access";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
+import { logLlmCost } from "@/lib/cost-events.server";
 import { getModelRoutingDecision } from "@/lib/model-decision";
 import { getModelForPass } from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
@@ -157,7 +168,7 @@ export async function POST(request: Request) {
     const horizon = buildForecastHorizon(briefingInput.date);
     const accessState = getRequestAccessState(user, request);
     const frontierModel = getModelForPass("synthesize");
-    const cheapModel = getModelForPass("compose");
+    const cheapModel = getModelForPass("compose", "forecast");
 
     const { send, close, response: sseResponse } = createSSEStream();
 
@@ -204,8 +215,20 @@ export async function POST(request: Request) {
           }
         }
 
+        const extractModel = getModelForPass("extract");
+
         try {
+          const signalsStart = Date.now();
           const signalsResult = await generateForecastSignals(forecastInput);
+          logLlmCost({
+            meta: { ...signalsResult, duration_ms: Date.now() - signalsStart },
+            feature: "forecast",
+            passLabel: "signals",
+            model: extractModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
           const signals = signalsResult.data;
 
           if (hasStrongForecastSignals(signals) === false) {
@@ -224,6 +247,7 @@ export async function POST(request: Request) {
             },
           });
 
+          const narrativeStart = Date.now();
           const narrativeResult = routingDecision.useFrontier
             ? await generateForecastNarrativeFrontier({
                 ...forecastInput,
@@ -233,6 +257,15 @@ export async function POST(request: Request) {
                 ...forecastInput,
                 signals,
               }, forecastOutputDepth);
+          logLlmCost({
+            meta: { ...narrativeResult, duration_ms: Date.now() - narrativeStart },
+            feature: "forecast",
+            passLabel: "narrative",
+            model: routingDecision.useFrontier ? frontierModel.model : cheapModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
           forecast = narrativeResult.data;
           requestCostEstimateUsd = sumEstimatedCosts([
             signalsResult.estimatedCostUsd,
@@ -277,6 +310,15 @@ export async function POST(request: Request) {
             structuredOutput: forecastRequest.structuredOutput,
             maxOutputTokens: forecastOutputDepth === "free" ? 900 : 2500,
           });
+          logLlmCost({
+            meta: forecastResult,
+            feature: "forecast",
+            passLabel: "narrative",
+            model: frontierModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
 
           try {
             forecast = validateForecastOutput(
@@ -313,6 +355,73 @@ export async function POST(request: Request) {
             forced_frontier_reasons: routingDecision?.forcedFrontierReasons ?? [],
             tone_preference: briefingInput.tone_preference,
           });
+        }
+
+        // Crisis detection — OUTPUT layer. Pure defense-in-depth (forecast
+        // has no user text input). On trigger we log internally and fail
+        // soft; we do not show Care Mode UI to a user who didn't ask a
+        // crisis-adjacent question.
+        const forecastText = JSON.stringify(forecast);
+        const outputCrisis = detectCrisisOutput(forecastText);
+
+        if (outputCrisis.triggered) {
+          void logCrisisDetected({
+            userId: user.id,
+            feature: "forecast",
+            platform,
+            detection: outputCrisis,
+            requestId,
+          });
+
+          send({
+            type: "error",
+            message:
+              "We couldn't generate your forecast. Please try again in a moment.",
+          });
+          return;
+        }
+
+        // Output safety classifier — 1.8. Same fail-soft pattern as crisis:
+        // Forecast has no user text input, so we log + surface a generic
+        // error rather than flash a safety card the user didn't provoke.
+        const safetyCtx: SafetyClassifyContext = {
+          userId: user.id,
+          tier: accessState.accessLevel,
+          feature: "forecast",
+          requestId,
+        };
+        const outputSafety = await classifyOutputSafety(forecastText, safetyCtx);
+
+        if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
+          const preSaveFinalModel =
+            fallbackReason !== null
+              ? frontierModel.model
+              : routingDecision?.useFrontier === true
+                ? frontierModel.model
+                : cheapModel.model;
+          void logOutputSafetyFlagged({
+            userId: user.id,
+            feature: "forecast",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: preSaveFinalModel,
+          });
+          void logOutputSafetyBlocked({
+            userId: user.id,
+            feature: "forecast",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: preSaveFinalModel,
+          });
+
+          send({
+            type: "error",
+            message:
+              "We couldn't generate your forecast. Please try again in a moment.",
+          });
+          return;
         }
 
         const saveResult = await upsertForecast({

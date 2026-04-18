@@ -39,6 +39,16 @@ import {
   isOnboardingComplete,
 } from "@/domain/profile/profile.service";
 import { buildNumerologySignal } from "@/domain/numerology/numerology.agent";
+import { detectCrisisOutput } from "@/domain/safety/crisis-detection";
+import { logCrisisDetected } from "@/domain/safety/crisis-log";
+import {
+  classifyOutputSafety,
+  type SafetyClassifyContext,
+} from "@/domain/safety/output-safety";
+import {
+  logOutputSafetyBlocked,
+  logOutputSafetyFlagged,
+} from "@/domain/safety/output-safety-log";
 import { getRequestAuth } from "@/lib/auth";
 import { getRequestAccessState } from "@/lib/debug-access";
 import {
@@ -49,6 +59,7 @@ import {
   type FreeAstroDailyContext,
 } from "@/lib/freeastroapi.server";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
+import { logCostEvent, logLlmCost } from "@/lib/cost-events.server";
 import { getModelRoutingDecision } from "@/lib/model-decision";
 import { getModelForPass } from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
@@ -89,13 +100,16 @@ function sumEstimatedCosts(values: Array<number | null | undefined>) {
   return Number(presentValues.reduce((sum, value) => sum + value, 0).toFixed(6));
 }
 
-async function buildFreeAstroDailyContext(params: {
-  date: string;
-  currentTimezone: string | null;
-  birthTimezone: string | null;
-  birthLatitude: number | null;
-  birthLongitude: number | null;
-}): Promise<FreeAstroDailyContext> {
+async function buildFreeAstroDailyContext(
+  params: {
+    date: string;
+    currentTimezone: string | null;
+    birthTimezone: string | null;
+    birthLatitude: number | null;
+    birthLongitude: number | null;
+  },
+  logCtx: { userId: string; tier: string; requestId: string },
+): Promise<FreeAstroDailyContext> {
   const notes: string[] = [];
   const limitations: FreeAstroDailyContext["limitations"] = [];
 
@@ -116,26 +130,64 @@ async function buildFreeAstroDailyContext(params: {
     };
   }
 
-  const chineseTodayPromise = fetchFreeAstroChineseToday();
   const panchangTimezone =
     params.currentTimezone?.trim() ||
     params.birthTimezone?.trim() ||
     "AUTO";
-  const panchangPromise =
-    params.birthLatitude == null || params.birthLongitude == null
-      ? Promise.resolve(null)
-      : fetchFreeAstroPanchang({
-          ...getDateParts(params.date),
-          lat: params.birthLatitude,
-          lng: params.birthLongitude,
-          city: null,
-          tzStr: panchangTimezone,
-        });
+  const attemptPanchang =
+    params.birthLatitude != null && params.birthLongitude != null;
+
+  const freeAstroStart = Date.now();
+
+  const chineseTodayPromise = fetchFreeAstroChineseToday();
+  const panchangPromise = attemptPanchang
+    ? fetchFreeAstroPanchang({
+        ...getDateParts(params.date),
+        lat: params.birthLatitude!,
+        lng: params.birthLongitude!,
+        city: null,
+        tzStr: panchangTimezone,
+      })
+    : Promise.resolve(null);
 
   const [chineseTodayResult, panchangResult] = await Promise.allSettled([
     chineseTodayPromise,
     panchangPromise,
   ]);
+
+  const freeAstroDurationMs = Date.now() - freeAstroStart;
+
+  // Log Chinese Today call
+  logCostEvent({
+    feature: "today",
+    pass_label: "chinese_today",
+    provider: "freeastroapi",
+    model: "freeastroapi",
+    cost_usd: null,
+    cost_is_estimated: false,
+    duration_ms: freeAstroDurationMs,
+    user_id: logCtx.userId,
+    tier: logCtx.tier,
+    succeeded: chineseTodayResult.status === "fulfilled",
+    request_id: logCtx.requestId,
+  });
+
+  // Log Panchang call (only if attempted)
+  if (attemptPanchang) {
+    logCostEvent({
+      feature: "today",
+      pass_label: "panchang",
+      provider: "freeastroapi",
+      model: "freeastroapi",
+      cost_usd: null,
+      cost_is_estimated: false,
+      duration_ms: freeAstroDurationMs,
+      user_id: logCtx.userId,
+      tier: logCtx.tier,
+      succeeded: panchangResult.status === "fulfilled",
+      request_id: logCtx.requestId,
+    });
+  }
 
   const chineseCurrentPillars =
     chineseTodayResult.status === "fulfilled" ? chineseTodayResult.value : null;
@@ -262,7 +314,7 @@ export async function POST(request: Request) {
       });
     const accessState = getRequestAccessState(user, request);
     const frontierModel = getModelForPass("synthesize");
-    const cheapModel = getModelForPass("compose");
+    const cheapModel = getModelForPass("compose", "today");
 
     const { send, close, response: sseResponse } = createSSEStream();
 
@@ -272,13 +324,16 @@ export async function POST(request: Request) {
 
         const freeAstroDailyContext =
           accessState.featureAccess.canGenerateUnlimitedToday
-            ? await buildFreeAstroDailyContext({
-                date: briefingInput.date,
-                currentTimezone: record.profile?.timezone ?? null,
-                birthTimezone: record.birthData?.birth_timezone ?? null,
-                birthLatitude: record.birthData?.birth_latitude ?? null,
-                birthLongitude: record.birthData?.birth_longitude ?? null,
-              })
+            ? await buildFreeAstroDailyContext(
+                {
+                  date: briefingInput.date,
+                  currentTimezone: record.profile?.timezone ?? null,
+                  birthTimezone: record.birthData?.birth_timezone ?? null,
+                  birthLatitude: record.birthData?.birth_latitude ?? null,
+                  birthLongitude: record.birthData?.birth_longitude ?? null,
+                },
+                { userId: user.id, tier: accessState.accessLevel, requestId },
+              )
             : {
                 chinese_current_pillars: null,
                 vedic_panchang: null,
@@ -314,7 +369,10 @@ export async function POST(request: Request) {
           }
         }
 
+        const extractModel = getModelForPass("extract");
+
         try {
+          const signalsStart = Date.now();
           const signalsResult = await generateTodaySignals({
             briefingInput,
             astrologyContext,
@@ -322,6 +380,15 @@ export async function POST(request: Request) {
             numerologySignal,
             freeAstroDailyContext: generationFreeAstroDailyContext,
             blueprintContext,
+          });
+          logLlmCost({
+            meta: { ...signalsResult, duration_ms: Date.now() - signalsStart },
+            feature: "today",
+            passLabel: "signals",
+            model: extractModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
           });
           const signals = signalsResult.data;
 
@@ -341,6 +408,7 @@ export async function POST(request: Request) {
             },
           });
 
+          const narrativeStart = Date.now();
           const narrativeResult = routingDecision.useFrontier
             ? await generateTodayNarrativeFrontier({
                 briefingInput,
@@ -360,6 +428,15 @@ export async function POST(request: Request) {
                 blueprintContext,
                 signals,
               });
+          logLlmCost({
+            meta: { ...narrativeResult, duration_ms: Date.now() - narrativeStart },
+            feature: "today",
+            passLabel: "narrative",
+            model: routingDecision.useFrontier ? frontierModel.model : cheapModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
           synthesisOutput = narrativeResult.data;
           requestCostEstimateUsd = sumEstimatedCosts([
             signalsResult.estimatedCostUsd,
@@ -411,6 +488,15 @@ export async function POST(request: Request) {
             stepName: "western output generation",
             structuredOutput: westernRequest.structuredOutput,
           });
+          logLlmCost({
+            meta: westernResult,
+            feature: "today",
+            passLabel: "western",
+            model: frontierModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
           let westernOutput;
 
           try {
@@ -440,6 +526,15 @@ export async function POST(request: Request) {
             systemPrompt: timingRequest.systemPrompt,
             userPrompt: timingRequest.userPrompt,
             stepName: "timing output generation",
+          });
+          logLlmCost({
+            meta: timingResult,
+            feature: "today",
+            passLabel: "timing",
+            model: frontierModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
           });
           let timingOutput;
 
@@ -474,6 +569,15 @@ export async function POST(request: Request) {
             userPrompt: synthesisRequest.userPrompt,
             maxOutputTokens: 1600,
             stepName: "final synthesis generation",
+          });
+          logLlmCost({
+            meta: synthesisResult,
+            feature: "today",
+            passLabel: "synthesis",
+            model: frontierModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
           });
 
           try {
@@ -517,6 +621,74 @@ export async function POST(request: Request) {
             forced_frontier_reasons: routingDecision?.forcedFrontierReasons ?? [],
             tone_preference: briefingInput.tone_preference,
           });
+        }
+
+        // Crisis detection — OUTPUT layer. Today has no user text input, so
+        // this is pure defense-in-depth. If the model ever slips into
+        // self-harm framing in a horoscope, we drop the output and fail
+        // soft with a generic error — we do NOT flash Care Mode at a user
+        // who didn't ask anything crisis-adjacent. We still log internally.
+        const synthesisText = JSON.stringify(synthesisOutput);
+        const outputCrisis = detectCrisisOutput(synthesisText);
+
+        if (outputCrisis.triggered) {
+          void logCrisisDetected({
+            userId: user.id,
+            feature: "today",
+            platform,
+            detection: outputCrisis,
+            requestId,
+          });
+
+          send({
+            type: "error",
+            message:
+              "We couldn't generate today's briefing. Please try again in a moment.",
+          });
+          return;
+        }
+
+        // Output safety classifier — 1.8. Same fail-soft pattern as crisis:
+        // Today has no user text input, so we log + surface a generic error
+        // rather than flash a safety card the user didn't provoke.
+        const safetyCtx: SafetyClassifyContext = {
+          userId: user.id,
+          tier: accessState.accessLevel,
+          feature: "today",
+          requestId,
+        };
+        const outputSafety = await classifyOutputSafety(synthesisText, safetyCtx);
+
+        if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
+          const preSaveFinalModel =
+            fallbackReason !== null
+              ? frontierModel.model
+              : routingDecision?.useFrontier === true
+                ? frontierModel.model
+                : cheapModel.model;
+          void logOutputSafetyFlagged({
+            userId: user.id,
+            feature: "today",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: preSaveFinalModel,
+          });
+          void logOutputSafetyBlocked({
+            userId: user.id,
+            feature: "today",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: preSaveFinalModel,
+          });
+
+          send({
+            type: "error",
+            message:
+              "We couldn't generate today's briefing. Please try again in a moment.",
+          });
+          return;
         }
 
         const saveResult = await upsertDailyBriefing({

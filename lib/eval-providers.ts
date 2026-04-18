@@ -19,6 +19,7 @@ type GenerateStructuredEvalInput = {
   model: string;
   systemPrompt: string;
   userPrompt: string;
+  cachedSystemBlock?: string;
   schemaName: string;
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
@@ -31,11 +32,14 @@ const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/messages";
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com/chat/completions";
 const REQUEST_TIMEOUT_MS = 120_000;
 
-// Pricing is intentionally left nullable until we have a reviewed price table for the
-// exact evaluation model IDs in use. The comparison document still exposes usage.
+// Pricing table for bakeoff cost estimation. Verify against anthropic.com/pricing.
 const MODEL_PRICING_USD_PER_1M: Partial<
   Record<string, { input: number; output: number }>
-> = {};
+> = {
+  "claude-haiku-4-5-20251001": { input: 0.8, output: 4.0 },
+  "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
+  "claude-opus-4-7": { input: 15.0, output: 75.0 },
+};
 
 function getProviderApiKey(provider: EvalProvider) {
   if (provider === "openai") {
@@ -258,6 +262,12 @@ function sanitizeJsonSchema(value: unknown, path: string[] = []): unknown {
     if (
       key === "$schema" ||
       key === "default" ||
+      key === "minimum" ||
+      key === "maximum" ||
+      key === "minItems" ||
+      key === "maxItems" ||
+      key === "minLength" ||
+      key === "maxLength" ||
       ((key === "title" || key === "description") && insidePropertiesMap === false)
     ) {
       return [];
@@ -813,7 +823,17 @@ async function callAnthropic(input: GenerateStructuredEvalInput) {
         body: JSON.stringify({
           model: input.model,
           max_tokens: maxOutputTokens,
-          system: input.systemPrompt,
+          system:
+            input.cachedSystemBlock != null
+              ? [
+                  {
+                    type: "text",
+                    text: input.cachedSystemBlock,
+                    cache_control: { type: "ephemeral" },
+                  },
+                  { type: "text", text: input.systemPrompt },
+                ]
+              : input.systemPrompt,
           messages: [
             {
               role: "user",

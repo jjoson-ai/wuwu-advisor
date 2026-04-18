@@ -110,6 +110,24 @@ const TODAY_DEFAULT_FRONTIER = {
   conflictScore: 0.32,
 } as const;
 
+// Tier-aware scaling for Today force/default thresholds.
+// Set after the 2026-04 launch bakeoff, which showed Haiku compose holds up at
+// the free tier on heavy signal days (burden ~0.6, conflict ~0.7) but reads
+// visibly less premium than Sonnet/Opus at the pro tier on the same signals.
+// Free: 1.10 → threshold floor is slightly higher so the cheap path survives
+// more often and captures the cost win. Pro: 0.88 → escalates ~12% earlier
+// so medium-intensity pro days reliably catch Opus/Sonnet synthesize.
+// Kept as multipliers (not hand-tuned per-field) because we only have two
+// profile anchors; this preserves the relative weighting of each gate.
+const TODAY_TIER_MULTIPLIER = {
+  free: 1.1,
+  pro: 0.88,
+} as const;
+
+function scaleForTodayTier(value: number, isFreeUser: boolean) {
+  return value * (isFreeUser ? TODAY_TIER_MULTIPLIER.free : TODAY_TIER_MULTIPLIER.pro);
+}
+
 function getScore(value: number | undefined) {
   return typeof value === "number" ? value : 0;
 }
@@ -330,29 +348,58 @@ export function getModelRoutingDecision({
   }
 
   // Today is the cheapest route by intent, so force-Opus only on clearer
-  // burden spikes or mixed signal combinations.
-  if (synthesisBurden >= TODAY_FORCE_FRONTIER.synthesisBurden) {
+  // burden spikes or mixed signal combinations. Thresholds are tier-scaled:
+  // pro escalates earlier, free holds the cheap path longer.
+  const isFreeUser = userContext.isFreeUser === true;
+  const forceSynthesisBurden = scaleForTodayTier(
+    TODAY_FORCE_FRONTIER.synthesisBurden,
+    isFreeUser,
+  );
+  const forceComplexityScore = scaleForTodayTier(
+    TODAY_FORCE_FRONTIER.complexityScore,
+    isFreeUser,
+  );
+  const forceConflictScore = scaleForTodayTier(
+    TODAY_FORCE_FRONTIER.conflictScore,
+    isFreeUser,
+  );
+  const forceAmbiguityConflictCombo = {
+    decisionAmbiguity: scaleForTodayTier(
+      TODAY_FORCE_FRONTIER.ambiguityConflictCombo.decisionAmbiguity,
+      isFreeUser,
+    ),
+    conflictScore: scaleForTodayTier(
+      TODAY_FORCE_FRONTIER.ambiguityConflictCombo.conflictScore,
+      isFreeUser,
+    ),
+  };
+  const forceNoBlueprintMidBurden = scaleForTodayTier(
+    TODAY_FORCE_FRONTIER.noBlueprintMidBurden,
+    isFreeUser,
+  );
+
+  if (synthesisBurden >= forceSynthesisBurden) {
     forcedFrontierReasons.push("synthesis_burden_high");
   }
 
-  if (complexityScore >= TODAY_FORCE_FRONTIER.complexityScore) {
+  if (complexityScore >= forceComplexityScore) {
     forcedFrontierReasons.push("complexity_high");
   }
 
-  if (conflictScore >= TODAY_FORCE_FRONTIER.conflictScore) {
+  if (conflictScore >= forceConflictScore) {
     forcedFrontierReasons.push("conflict_high");
   }
 
   if (
-    decisionAmbiguity >= TODAY_FORCE_FRONTIER.ambiguityConflictCombo.decisionAmbiguity &&
-    conflictScore >= TODAY_FORCE_FRONTIER.ambiguityConflictCombo.conflictScore
+    decisionAmbiguity >= forceAmbiguityConflictCombo.decisionAmbiguity &&
+    conflictScore >= forceAmbiguityConflictCombo.conflictScore
   ) {
     forcedFrontierReasons.push("ambiguity_conflict_combo");
   }
 
   if (
     userContext.hasBlueprint === false &&
-    synthesisBurden >= TODAY_FORCE_FRONTIER.noBlueprintMidBurden
+    synthesisBurden >= forceNoBlueprintMidBurden
   ) {
     forcedFrontierReasons.push("no_blueprint_mid_burden");
   }
@@ -383,9 +430,12 @@ export function getModelRoutingDecision({
 
   return {
     useFrontier:
-      synthesisBurden >= TODAY_DEFAULT_FRONTIER.synthesisBurden ||
-      complexityScore >= TODAY_DEFAULT_FRONTIER.complexityScore ||
-      conflictScore >= TODAY_DEFAULT_FRONTIER.conflictScore,
+      synthesisBurden >=
+        scaleForTodayTier(TODAY_DEFAULT_FRONTIER.synthesisBurden, isFreeUser) ||
+      complexityScore >=
+        scaleForTodayTier(TODAY_DEFAULT_FRONTIER.complexityScore, isFreeUser) ||
+      conflictScore >=
+        scaleForTodayTier(TODAY_DEFAULT_FRONTIER.conflictScore, isFreeUser),
     synthesisBurden,
     forcedFrontierReasons,
     normalizedSignals,

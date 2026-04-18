@@ -16,6 +16,11 @@ import {
 } from "@/domain/decision/decision.types";
 import { validateDecisionGuidanceOutput } from "@/domain/decision/decision.agent";
 import type { NumerologyContext } from "@/domain/numerology/context";
+import {
+  FINANCIAL_SAFETY_RULES,
+  LIFE_DECISION_COACH_RULES,
+  isLifeStakesQuestion,
+} from "@/domain/safety/prompt-rules";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
 import { getModelForPass, type GenerationPass } from "@/lib/model-routing";
 
@@ -58,6 +63,9 @@ type DecisionTwoPassInput = {
   latestBriefing: unknown | null;
   latestForecast: unknown | null;
   latestBlueprint: unknown | null;
+  // Injected from the memory pipeline. Only present in the guidance pass
+  // (not the signals pass). Null when memory is disabled or no facts exist.
+  rememberedFacts?: string | null;
 };
 
 type DecisionGuidanceFromSignalsInput = DecisionTwoPassInput & {
@@ -74,8 +82,14 @@ function buildDecisionSignalsSystemPrompt(input: DailyBriefingInput) {
     "Do not use direct instruction.",
     "Describe intent, tradeoff, signal relevance, and time sensitivity only.",
     "Keep each field concise and specific to the question.",
+    "Routing scores (complexityScore, conflictScore, emotionalIntensity, decisionAmbiguity) are floats between 0.0 and 1.0 inclusive. Use 0.0 for 'none', 0.3 for 'mild', 0.5 for 'moderate', 0.7 for 'strong', 1.0 for 'extreme'. Never emit values above 1.0 or on a 0-10 or 0-100 scale.",
+    "complexityScore: how many distinct astrological, numerological, or chinese-astrology threads bear on this specific decision.",
+    "conflictScore: how strongly the active signals pull against each other in the context of this question.",
+    "emotionalIntensity: how emotionally loaded, tender, or high-stakes the decision feels for this person.",
+    "decisionAmbiguity: how unclear the right action is from the signals alone — higher when the tradeoffs are balanced or the question is framed vaguely.",
     "Routing metadata is internal only. Do not mention internal scores, debug fields, hidden system variables, or classifier names in any string field.",
     "No generic coaching or generic horoscope phrasing.",
+    ...FINANCIAL_SAFETY_RULES,
     `Tone preference reference: ${input.tone_preference}.`,
   ].join("\n\n");
 }
@@ -122,7 +136,15 @@ export function buildDecisionSignalsRequest(input: DecisionTwoPassInput) {
 function buildDecisionGuidanceSystemPrompt(
   input: DailyBriefingInput,
   pass: GenerationPass,
+  lifeStakesDetected: boolean,
 ) {
+  const lifeStakesReinforcement = lifeStakesDetected
+    ? [
+        "Deterministic life-stakes signal: this question contains an irreversible life-decision framing. Decision Coach mode is mandatory for this response.",
+        "You must not render a directive verdict on whether to leave, quit, end, stay, break up, move, sell, or disclose. Reflect the tension, surface two or three chart-based considerations, pose three concrete questions for the user to sit with, and name the appropriate human professional for the domain.",
+      ]
+    : [];
+
   return [
     "Return exactly one JSON object and nothing else.",
     "Do not write markdown, commentary, or extra keys.",
@@ -131,6 +153,9 @@ function buildDecisionGuidanceSystemPrompt(
     "Do NOT present multiple equal options.",
     "Do NOT hedge excessively.",
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
+    ...FINANCIAL_SAFETY_RULES,
+    ...LIFE_DECISION_COACH_RULES,
+    ...lifeStakesReinforcement,
     "Reject generic phrasing such as 'today is a good day' or 'you may feel'.",
     "Instead: name the specific tradeoff, the decision posture, and the next move.",
     "Every statement must map to a specific signal.",
@@ -148,6 +173,8 @@ function buildDecisionGuidanceSystemPrompt(
 function buildDecisionGuidanceUserPrompt(input: DecisionGuidanceFromSignalsInput) {
   return JSON.stringify(
     {
+      // remembered_facts in the user prompt (not system) to preserve cache.
+      remembered_facts: input.rememberedFacts ?? null,
       question: input.question,
       decision_type: input.decisionType,
       decision_horizon: input.decisionHorizon,
@@ -176,7 +203,11 @@ export function buildDecisionGuidanceRequest(
   pass: GenerationPass,
 ) {
   return {
-    systemPrompt: buildDecisionGuidanceSystemPrompt(input.briefingInput, pass),
+    systemPrompt: buildDecisionGuidanceSystemPrompt(
+      input.briefingInput,
+      pass,
+      isLifeStakesQuestion(input.question),
+    ),
     userPrompt: buildDecisionGuidanceUserPrompt(input),
     schemaName: "decision_guidance",
     structuredOutput: {
@@ -218,6 +249,7 @@ export async function generateAskSignals(input: DecisionTwoPassInput) {
     data: DecisionSignalsSchema.parse(result.parsedJson),
     estimatedCostUsd: result.estimatedCostUsd,
     costIsEstimated: result.costIsEstimated,
+    usage: result.usage,
   };
 }
 
@@ -241,6 +273,7 @@ async function generateAskGuidanceForPass(
     data: validateDecisionGuidanceOutput(result.parsedJson) as DecisionGuidance,
     estimatedCostUsd: result.estimatedCostUsd,
     costIsEstimated: result.costIsEstimated,
+    usage: result.usage,
   };
 }
 

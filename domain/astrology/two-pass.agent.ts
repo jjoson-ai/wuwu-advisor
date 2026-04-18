@@ -65,6 +65,11 @@ function buildTodaySignalsSystemPrompt(input: DailyBriefingInput) {
     "Do not use 'you should', 'try to', or direct instruction.",
     "State tensions, opportunities, risks, timing, and domain conditions only.",
     "Use short factual phrases, not prose.",
+    "Routing scores (complexityScore, conflictScore, emotionalIntensity, decisionAmbiguity) are floats between 0.0 and 1.0 inclusive. Use 0.0 for 'none', 0.3 for 'mild', 0.5 for 'moderate', 0.7 for 'strong', 1.0 for 'extreme'. Never emit values above 1.0 or on a 0-10 or 0-100 scale.",
+    "complexityScore: how many distinct astrological or numerological threads need to be weighed together today.",
+    "conflictScore: how strongly the active signals pull against each other (e.g. Aries Moon vs Taurus Sun, Mercury retrograde vs a decisive timing window).",
+    "emotionalIntensity: how emotionally loaded or tender the day's configuration is.",
+    "decisionAmbiguity: how unclear the right action is from the signals alone.",
     "Routing metadata is internal only. Do not mention internal scores, debug fields, hidden system variables, or classifier names in any string field.",
     "Ground every field in the provided context. No generic horoscope phrasing.",
     `Tone preference reference: ${input.tone_preference}.`,
@@ -127,16 +132,33 @@ function buildTodayNarrativeSystemPrompt(
   ].join("\n\n");
 }
 
+/**
+ * Stable per-user/per-session context that rarely changes between requests.
+ * Emitted as a cached system block so prompt caching can amortize it across
+ * the many Today generations a single user triggers in one session.
+ */
+function buildTodayCachedContextBlock(input: TodayNarrativeInput) {
+  return JSON.stringify(
+    {
+      stable_user_context: {
+        natal_context: input.astrologyContext.natal_context,
+        numerology_context: input.numerologyContext,
+        numerology_signal: input.numerologySignal,
+        blueprint_context: input.blueprintContext,
+      },
+    },
+    null,
+    2,
+  );
+}
+
 function buildTodayNarrativeUserPrompt(input: TodayNarrativeInput) {
   return JSON.stringify(
     {
       briefing_input: DailyBriefingInputSchema.parse(input.briefingInput),
       signals: input.signals,
-      astrology_context: input.astrologyContext,
-      numerology_context: input.numerologyContext,
-      numerology_signal: input.numerologySignal,
+      daily_astrology_context: input.astrologyContext.daily_context,
       freeastro_daily_context: input.freeAstroDailyContext,
-      blueprint_context: input.blueprintContext,
     },
     null,
     2,
@@ -150,6 +172,7 @@ export function buildTodayNarrativeRequest(
   return {
     systemPrompt: buildTodayNarrativeSystemPrompt(input.briefingInput, pass),
     userPrompt: buildTodayNarrativeUserPrompt(input),
+    cachedSystemBlock: buildTodayCachedContextBlock(input),
     schemaName: "today_narrative",
     structuredOutput: {
       name: "today_narrative",
@@ -194,6 +217,7 @@ export async function generateTodaySignals(input: TodaySignalsInput) {
     data: TodaySignalsSchema.parse(result.parsedJson),
     estimatedCostUsd: result.estimatedCostUsd,
     costIsEstimated: result.costIsEstimated,
+    usage: result.usage,
   };
 }
 
@@ -201,13 +225,14 @@ async function generateTodayNarrativeForPass(
   input: TodayNarrativeInput,
   pass: GenerationPass,
 ) {
-  const model = getModelForPass(pass);
+  const model = getModelForPass(pass, "today");
   const request = buildTodayNarrativeRequest(input, pass);
   const result = await generateJsonObjectWithMeta({
     provider: model.provider,
     model: model.model,
     systemPrompt: request.systemPrompt,
     userPrompt: request.userPrompt,
+    cachedSystemBlock: request.cachedSystemBlock,
     structuredOutput: request.structuredOutput,
     stepName: `today ${pass} narrative generation`,
     maxOutputTokens: request.maxOutputTokens,
@@ -217,6 +242,7 @@ async function generateTodayNarrativeForPass(
     data: validateFinalSynthesisOutput(result.parsedJson) as FinalSynthesisOutput,
     estimatedCostUsd: result.estimatedCostUsd,
     costIsEstimated: result.costIsEstimated,
+    usage: result.usage,
   };
 }
 

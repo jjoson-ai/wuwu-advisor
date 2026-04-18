@@ -62,6 +62,10 @@ function buildForecastSignalsSystemPrompt(input: DailyBriefingInput) {
     "Do not write planning recommendations.",
     "Do not write narrative paragraphs.",
     "Describe the current phase, what is gaining momentum, the next shift, the likely shift window, risks, opportunities, and energy trend only.",
+    "Routing scores (complexityScore, conflictScore, phaseShiftScore) are floats between 0.0 and 1.0 inclusive. Use 0.0 for 'none', 0.3 for 'mild', 0.5 for 'moderate', 0.7 for 'strong', 1.0 for 'extreme'. Never emit values above 1.0 or on a 0-10 or 0-100 scale.",
+    "complexityScore: how many distinct medium-horizon threads (transits, numerology cycles, chinese-astrology shifts) need to be weighed together across this period.",
+    "conflictScore: how strongly the active period signals pull against each other (e.g. an expansion phase layered on a grounding numerology year).",
+    "phaseShiftScore: how pronounced the shift between the current phase and the next one is over this horizon.",
     "Routing metadata is internal only. Do not mention internal scores, debug fields, hidden system variables, or classifier names in any string field.",
     "Keep it specific to this period. No generic monthly horoscope phrasing.",
     "Do not use today, weekday, morning, afternoon, evening, or intraday timing language.",
@@ -145,27 +149,38 @@ function buildForecastNarrativeSystemPrompt(
   ].join("\n\n");
 }
 
+/**
+ * Stable per-user/per-session context. Emitted as a cached system block so
+ * prompt caching can amortize it across repeated Forecast generations.
+ */
+function buildForecastCachedContextBlock(input: ForecastNarrativeInput) {
+  return JSON.stringify(
+    {
+      stable_user_context: {
+        natal_context: input.astrologyContext.natal_context,
+        numerology_context: input.numerologyContext,
+        chinese_astrology_context: input.chineseAstrologyContext,
+        blueprint_context: input.blueprintContext,
+      },
+    },
+    null,
+    2,
+  );
+}
+
 function buildForecastNarrativeUserPrompt(input: ForecastNarrativeInput) {
   return JSON.stringify(
     {
       display_name: input.briefingInput.display_name,
       forecast_horizon: input.horizon,
       signals: input.signals,
-      stable_astrology: {
-        natal_context: input.astrologyContext.natal_context,
-      },
       current_astrology: {
         current_sun_sign: input.astrologyContext.daily_context.current_sun_sign,
         current_sun_longitude_degrees:
           input.astrologyContext.daily_context.current_sun_longitude_degrees,
         current_moon_sign: input.astrologyContext.daily_context.current_moon_sign,
       },
-      numerology_context: input.numerologyContext,
-      chinese_astrology: {
-        context: input.chineseAstrologyContext,
-        signal: input.chineseAstrologySignal,
-      },
-      blueprint_context: input.blueprintContext,
+      chinese_astrology_signal: input.chineseAstrologySignal,
     },
     null,
     2,
@@ -187,6 +202,7 @@ export function buildForecastNarrativeRequest(
       outputDepth,
     ),
     userPrompt: buildForecastNarrativeUserPrompt(input),
+    cachedSystemBlock: buildForecastCachedContextBlock(input),
     schemaName: "forecast_narrative",
     structuredOutput: {
       name: "forecast_narrative",
@@ -234,6 +250,7 @@ export async function generateForecastSignals(input: ForecastTwoPassInput) {
     data: ForecastSignalsSchema.parse(result.parsedJson),
     estimatedCostUsd: result.estimatedCostUsd,
     costIsEstimated: result.costIsEstimated,
+    usage: result.usage,
   };
 }
 
@@ -242,13 +259,14 @@ async function generateForecastNarrativeForPass(
   pass: GenerationPass,
   outputDepth: ForecastOutputDepth,
 ) {
-  const model = getModelForPass(pass);
+  const model = getModelForPass(pass, "forecast");
   const request = buildForecastNarrativeRequest(input, pass, outputDepth);
   const result = await generateJsonObjectWithMeta({
     provider: model.provider,
     model: model.model,
     systemPrompt: request.systemPrompt,
     userPrompt: request.userPrompt,
+    cachedSystemBlock: request.cachedSystemBlock,
     structuredOutput: request.structuredOutput,
     stepName: `forecast ${pass} narrative generation`,
     maxOutputTokens: request.maxOutputTokens,
@@ -258,6 +276,7 @@ async function generateForecastNarrativeForPass(
     data: validateForecastOutput(result.parsedJson, outputDepth) as Forecast,
     estimatedCostUsd: result.estimatedCostUsd,
     costIsEstimated: result.costIsEstimated,
+    usage: result.usage,
   };
 }
 

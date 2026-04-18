@@ -1,6 +1,7 @@
 const FREEASTROAPI_BASE_URL = "https://api.freeastroapi.com";
 const MIN_FREEASTRO_REQUEST_INTERVAL_MS = 1100;
 const DEFAULT_RETRY_AFTER_MS = 1500;
+const FREEASTROAPI_REQUEST_TIMEOUT_MS = 10_000;
 
 export type BaziCalculationMarker = "M" | "F";
 
@@ -141,37 +142,47 @@ async function requestFreeAstroApi<T>(
   options: FreeAstroRequestOptions,
 ): Promise<T> {
   const apiKey = ensureFreeAstroApiKey();
-  const firstResponse = await sendFreeAstroRequest(options, apiKey);
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    FREEASTROAPI_REQUEST_TIMEOUT_MS,
+  );
 
-  if (firstResponse.ok) {
-    return parseJsonResponse<T>(firstResponse, options.path);
-  }
+  try {
+    const firstResponse = await sendFreeAstroRequest(options, apiKey, controller.signal);
 
-  const firstError = await parseFreeAstroError(firstResponse);
-
-  if (firstResponse.status === 429) {
-    await sleep(firstError.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS);
-    const retryResponse = await sendFreeAstroRequest(options, apiKey);
-
-    if (retryResponse.ok) {
-      return parseJsonResponse<T>(retryResponse, options.path);
+    if (firstResponse.ok) {
+      return parseJsonResponse<T>(firstResponse, options.path);
     }
 
-    const retryError = await parseFreeAstroError(retryResponse);
+    const firstError = await parseFreeAstroError(firstResponse);
+
+    if (firstResponse.status === 429) {
+      await sleep(firstError.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS);
+      const retryResponse = await sendFreeAstroRequest(options, apiKey, controller.signal);
+
+      if (retryResponse.ok) {
+        return parseJsonResponse<T>(retryResponse, options.path);
+      }
+
+      const retryError = await parseFreeAstroError(retryResponse);
+      throw new FreeAstroRequestError({
+        endpoint: options.path,
+        statusCode: retryResponse.status,
+        detail: retryError.detail,
+        retried: true,
+      });
+    }
+
     throw new FreeAstroRequestError({
       endpoint: options.path,
-      statusCode: retryResponse.status,
-      detail: retryError.detail,
-      retried: true,
+      statusCode: firstResponse.status,
+      detail: firstError.detail,
+      retried: false,
     });
+  } finally {
+    clearTimeout(timeout);
   }
-
-  throw new FreeAstroRequestError({
-    endpoint: options.path,
-    statusCode: firstResponse.status,
-    detail: firstError.detail,
-    retried: false,
-  });
 }
 
 function summarizeElementBalance(
@@ -286,6 +297,7 @@ async function withFreeAstroThrottle<T>(action: () => Promise<T>): Promise<T> {
 async function sendFreeAstroRequest(
   options: FreeAstroRequestOptions,
   apiKey: string,
+  signal: AbortSignal,
 ) {
   return withFreeAstroThrottle(() =>
     fetch(`${FREEASTROAPI_BASE_URL}${options.path}`, {
@@ -296,6 +308,7 @@ async function sendFreeAstroRequest(
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       cache: "no-store",
+      signal,
     }),
   );
 }
