@@ -3,6 +3,7 @@ import "server-only";
 import type { PostgrestError } from "@supabase/supabase-js";
 
 import { getUserAccessLevel, type AccessLevel } from "@/lib/access";
+import { getStripeServerClient } from "@/lib/stripe";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export type DashboardTimeWindow = "today" | "7d" | "30d" | "mtd";
@@ -31,6 +32,9 @@ type MetricCard = {
   value: string;
   detail: string;
   status: MetricStatus;
+  /** Change vs the prior equivalent window, e.g. "+14% vs prior 7d" */
+  delta?: string | null;
+  deltaDirection?: "up" | "down" | "neutral";
 };
 
 type ProductEventRow = {
@@ -126,6 +130,10 @@ export type OperatorDashboardData = {
   telemetryStatus: {
     productEventsReady: boolean;
     routingEventsReady: boolean;
+  };
+  /** Top-level P&L snapshot — MRR, cost, margin, net new. */
+  profitability: {
+    metrics: MetricCard[];
   };
   revenue: {
     metrics: MetricCard[];
@@ -305,6 +313,118 @@ function formatUsd(value: number | null) {
   return `$${value.toFixed(2)}`;
 }
 
+/**
+ * Prior window immediately preceding the current window (same duration).
+ * Used for period-over-period delta computation.
+ */
+function buildPriorWindowRange(
+  timeWindow: DashboardTimeWindow,
+  now: Date,
+): { start: Date; end: Date } {
+  const currentStart = buildTimeWindowStart(timeWindow, now);
+
+  if (timeWindow === "today") {
+    const end = new Date(currentStart); // today 00:00
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - 1); // yesterday 00:00
+    return { start, end };
+  }
+
+  if (timeWindow === "mtd") {
+    const end = new Date(currentStart); // first of this month
+    const start = new Date(end);
+    start.setUTCMonth(start.getUTCMonth() - 1); // first of last month
+    return { start, end };
+  }
+
+  const days = timeWindow === "7d" ? 7 : 30;
+  const end = new Date(currentStart); // e.g. now-7d
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - days);
+  return { start, end };
+}
+
+/**
+ * Returns a formatted delta string and direction for a numeric comparison.
+ * Returns null when there is no meaningful prior (both zero or no prior data).
+ */
+function formatDelta(
+  current: number,
+  prior: number,
+): { text: string; direction: "up" | "down" | "neutral" } | null {
+  if (prior === 0 && current === 0) return null;
+  if (prior === 0) return { text: `+${current} new`, direction: "up" };
+  const pct = ((current - prior) / prior) * 100;
+  if (Math.abs(pct) < 1) return { text: "≈ flat vs prior", direction: "neutral" };
+  const sign = pct > 0 ? "+" : "";
+  return {
+    text: `${sign}${Math.round(pct)}% vs prior`,
+    direction: pct > 0 ? "up" : "down",
+  };
+}
+
+/**
+ * Scales a period LLM cost to an approximate monthly figure for margin estimation.
+ */
+function estimateMonthlyLlmCost(
+  totalCost: number,
+  timeWindow: DashboardTimeWindow,
+  now: Date,
+): number {
+  const daysInWindow =
+    timeWindow === "today" ? 1
+    : timeWindow === "7d" ? 7
+    : timeWindow === "30d" ? 30
+    : now.getUTCDate(); // mtd: days elapsed this month
+  return daysInWindow > 0 ? (totalCost / daysInWindow) * 30 : 0;
+}
+
+type StripeRevenueData = {
+  mrr: number | null;
+  monthlyCount: number;
+  annualCount: number;
+  totalCount: number;
+};
+
+async function safeFetchStripeRevenue(
+  setupNotes: string[],
+): Promise<StripeRevenueData> {
+  try {
+    const stripe = getStripeServerClient();
+    let mrr = 0;
+    let monthlyCount = 0;
+    let annualCount = 0;
+
+    const subscriptions = await stripe.subscriptions.list({
+      status: "active",
+      limit: 100,
+      expand: ["data.items.data.price"],
+    });
+
+    for (const sub of subscriptions.data) {
+      for (const item of sub.items.data) {
+        const price = item.price;
+        const gross = ((price.unit_amount ?? 0) * (item.quantity ?? 1)) / 100;
+
+        if (price.recurring?.interval === "month") {
+          mrr += gross;
+          monthlyCount++;
+        } else if (price.recurring?.interval === "year") {
+          mrr += gross / 12;
+          annualCount++;
+        }
+      }
+    }
+
+    return { mrr, monthlyCount, annualCount, totalCount: monthlyCount + annualCount };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Stripe revenue fetch failed.";
+    setupNotes.push(`Stripe MRR unavailable: ${message}`);
+    return { mrr: null, monthlyCount: 0, annualCount: 0, totalCount: 0 };
+  }
+}
+
 function getModelFamily(model: string) {
   const normalized = model.toLowerCase();
 
@@ -421,7 +541,10 @@ export async function getOperatorDashboardData(
   const supabase = getSupabaseAdminClient();
   const now = new Date();
   const windowStart = buildTimeWindowStart(filters.timeWindow, now).toISOString();
+  const priorRange = buildPriorWindowRange(filters.timeWindow, now);
   const setupNotes: string[] = [];
+
+  const [stripeRevenue] = await Promise.all([safeFetchStripeRevenue(setupNotes)]);
 
   const productEventsResult = await safeFetchTelemetryRows<ProductEventRow>(
     () =>
@@ -450,6 +573,22 @@ export async function getOperatorDashboardData(
           .gte("occurred_at", windowStart)
           .lte("occurred_at", now.toISOString())
           .order("occurred_at", { ascending: false })
+          .range(from, to),
+      ),
+    setupNotes,
+  );
+
+  // Prior-period product events — only the fields needed for delta computation
+  const priorProductEventsResult = await safeFetchTelemetryRows<
+    Pick<ProductEventRow, "event_name" | "request_cost_estimate_usd" | "user_id" | "tier">
+  >(
+    () =>
+      fetchAllRows(async (from, to) =>
+        await supabase
+          .from("product_events")
+          .select("event_name, request_cost_estimate_usd, user_id, tier")
+          .gte("occurred_at", priorRange.start.toISOString())
+          .lte("occurred_at", priorRange.end.toISOString())
           .range(from, to),
       ),
     setupNotes,
@@ -584,6 +723,45 @@ export async function getOperatorDashboardData(
     0,
   );
 
+  // LLM cost split by tier
+  const paidLlmCostEvents = llmCostTracked.filter(
+    (e) => e.tier === "pro" || e.tier === "internal",
+  );
+  const freeLlmCostEvents = llmCostTracked.filter((e) => e.tier === "free");
+  const paidLlmCost = paidLlmCostEvents.reduce(
+    (sum, e) => sum + (e.request_cost_estimate_usd ?? 0), 0,
+  );
+  const freeLlmCost = freeLlmCostEvents.reduce(
+    (sum, e) => sum + (e.request_cost_estimate_usd ?? 0), 0,
+  );
+  const paidLlmUserIds = new Set(
+    paidLlmCostEvents.map((e) => e.user_id).filter((id): id is string => id !== null),
+  );
+  const freeLlmUserIds = new Set(
+    freeLlmCostEvents.map((e) => e.user_id).filter((id): id is string => id !== null),
+  );
+
+  // Prior period deltas
+  const priorCheckoutCompleted = priorProductEventsResult.rows.filter(
+    (e) => e.event_name === "checkout_completed",
+  );
+  const priorLlmCostTracked = priorProductEventsResult.rows.filter(
+    (e) => e.request_cost_estimate_usd != null,
+  );
+  const priorTotalLlmCost = priorLlmCostTracked.reduce(
+    (sum, e) => sum + (e.request_cost_estimate_usd ?? 0), 0,
+  );
+  const priorAskSubmitted = priorProductEventsResult.rows.filter(
+    (e) => e.event_name === "ask_submitted",
+  );
+
+  // Gross margin estimate: MRR vs annualised period LLM cost
+  const monthlyLlmCostEst = estimateMonthlyLlmCost(totalTrackedLlmCost, filters.timeWindow, now);
+  const grossMarginEst =
+    stripeRevenue.mrr !== null && stripeRevenue.mrr > 0 && totalTrackedLlmCost > 0
+      ? ((stripeRevenue.mrr - monthlyLlmCostEst) / stripeRevenue.mrr) * 100
+      : null;
+
   const conversionRowMap = filteredProductEvents.reduce((map, event) => {
       if (
         event.event_name !== "paywall_shown" &&
@@ -700,6 +878,16 @@ export async function getOperatorDashboardData(
   const totalFeedbackCount =
     filteredBriefingFeedback.length + filteredDecisionFeedback.length;
 
+  const checkoutDelta = priorProductEventsResult.ready
+    ? formatDelta(checkoutCompleted.length, priorCheckoutCompleted.length)
+    : null;
+  const llmCostDelta = priorProductEventsResult.ready && priorTotalLlmCost > 0
+    ? formatDelta(totalTrackedLlmCost, priorTotalLlmCost)
+    : null;
+  const askDelta = priorProductEventsResult.ready
+    ? formatDelta(askSubmitted.length, priorAskSubmitted.length)
+    : null;
+
   return {
     filters,
     windowLabel: buildWindowLabel(filters),
@@ -708,25 +896,64 @@ export async function getOperatorDashboardData(
       productEventsReady: productEventsResult.ready,
       routingEventsReady: routingEventsResult.ready,
     },
+    profitability: {
+      metrics: [
+        {
+          label: "MRR",
+          value: stripeRevenue.mrr !== null ? `$${stripeRevenue.mrr.toFixed(2)}` : "—",
+          detail:
+            stripeRevenue.mrr !== null
+              ? `${stripeRevenue.totalCount} active sub${stripeRevenue.totalCount !== 1 ? "s" : ""}. ${stripeRevenue.monthlyCount} monthly, ${stripeRevenue.annualCount} annual (normalised to monthly).`
+              : "Stripe connection unavailable. Check STRIPE_SECRET_KEY.",
+          status: stripeRevenue.mrr !== null ? "live" : "placeholder",
+        } satisfies MetricCard,
+        {
+          label: "LLM cost (period)",
+          value: llmCostTracked.length === 0 ? "—" : formatUsd(totalTrackedLlmCost),
+          detail:
+            llmCostTracked.length === 0
+              ? "No tracked cost yet. request_cost_estimate_usd not populated."
+              : `Paid: ${formatUsd(paidLlmCost)} across ${paidLlmUserIds.size} users. Free: ${formatUsd(freeLlmCost)} across ${freeLlmUserIds.size} users. ${estimatedLlmCostTracked.length} of ${llmCostTracked.length} events use token-based estimates.`,
+          status: llmCostTracked.length === 0 ? "placeholder" : "live",
+          delta: llmCostDelta?.text ?? null,
+          deltaDirection: llmCostDelta?.direction ?? "neutral",
+        } satisfies MetricCard,
+        {
+          label: "Gross margin (est.)",
+          value: grossMarginEst !== null ? `${grossMarginEst.toFixed(1)}%` : "—",
+          detail:
+            grossMarginEst !== null
+              ? `MRR $${stripeRevenue.mrr!.toFixed(2)} − est. monthly LLM $${monthlyLlmCostEst.toFixed(2)}. Excludes astro API, infra, ads.`
+              : stripeRevenue.mrr === null
+                ? "Needs Stripe MRR."
+                : "Needs tracked LLM cost.",
+          status: grossMarginEst !== null ? "proxy" : "placeholder",
+        } satisfies MetricCard,
+        {
+          label: "New paid (period)",
+          value: `${checkoutCompleted.length}`,
+          detail: `Checkout completions in ${buildWindowLabel(filters).toLowerCase()}. Cancellations tracked in Stripe, not yet surfaced here.`,
+          status: "live",
+          delta: checkoutDelta?.text ?? null,
+          deltaDirection: checkoutDelta?.direction ?? "neutral",
+        } satisfies MetricCard,
+      ],
+    },
     revenue: {
       metrics: [
         {
-          label: "Current paid accounts",
+          label: "Paid accounts",
           value: `${currentPaidUsers.length}`,
-          detail: "Live from Supabase auth metadata.",
+          detail: "Active Pro accounts from Supabase auth metadata.",
           status: "live",
         },
         {
-          label: "Checkout start → completion",
+          label: "Checkout conversion",
           value: percentage(checkoutCompleted.length, checkoutStarted.length),
           detail: `${checkoutStarted.length} started / ${checkoutCompleted.length} completed in ${buildWindowLabel(filters).toLowerCase()}.`,
           status: "live",
-        },
-        {
-          label: "Web share of paid checkouts",
-          value: percentage(webCheckoutCompleted.length, checkoutCompleted.length),
-          detail: "Live from checkout_completed platform split.",
-          status: "live",
+          delta: checkoutDelta?.text ?? null,
+          deltaDirection: checkoutDelta?.direction ?? "neutral",
         },
       ],
       conversionRows,
@@ -736,38 +963,35 @@ export async function getOperatorDashboardData(
         {
           label: "Paid active users",
           value: `${paidActiveUserIds.size}`,
-          detail: `Proxy: currently paid accounts with any tracked event in ${buildWindowLabel(filters).toLowerCase()}.`,
+          detail: `Proxy: paid accounts with ≥1 tracked event in the window. True D7/D30 cohort at /ops/funnel.`,
           status: "proxy",
         },
         {
           label: "Paid active share",
           value: percentage(paidActiveUserIds.size, currentPaidUsers.length),
-          detail: "Proxy only. True D7/D30 cohort retention is not yet persisted.",
+          detail: "Proxy. True cohort retention table at /ops/funnel.",
           status: "proxy",
-        },
-        {
-          label: "Paid D7 / D30 retention",
-          value: "Pending",
-          detail: "Placeholder until subscription cohort telemetry is persisted.",
-          status: "placeholder",
         },
       ],
     },
     usage: {
       metrics: [
         {
-          label: "Ask intensity per active ask user",
+          label: "Asks per active user",
           value: formatDecimal(
             askSubmitted.length === 0
               ? null
-              : askSubmitted.length / Math.max(countUniqueNonNull(askSubmitted.map((row) => row.user_id)), 1),
+              : askSubmitted.length /
+                  Math.max(countUniqueNonNull(askSubmitted.map((row) => row.user_id)), 1),
             2,
           ),
-          detail: "Live from ask_submitted events.",
+          detail: "Ask submissions per unique user with ≥1 ask in the window.",
           status: "live",
+          delta: askDelta?.text ?? null,
+          deltaDirection: askDelta?.direction ?? "neutral",
         },
         {
-          label: "Ask intensity per paid ask user",
+          label: "Asks per paid user",
           value: formatDecimal(
             askPaidSubmitted.length === 0
               ? null
@@ -775,19 +999,19 @@ export async function getOperatorDashboardData(
                   Math.max(countUniqueNonNull(askPaidSubmitted.map((row) => row.user_id)), 1),
             2,
           ),
-          detail: "Live from Pro Ask usage only.",
+          detail: "Pro Ask submissions per unique paid user in the window.",
           status: "live",
         },
         {
           label: "Repeat Ask within 24h",
           value: percentage(askRepeatWithin24h.length, askSubmitted.length),
-          detail: "Live from repeat_within_24h instrumentation.",
+          detail: "Share of ask sessions followed by another within 24 hours.",
           status: "live",
         },
         {
           label: "Ask regeneration rate",
           value: percentage(askRegenerated.length, askSubmitted.length),
-          detail: "Live from ask_regenerated / ask_submitted.",
+          detail: "ask_regenerated / ask_submitted — proxy for response dissatisfaction.",
           status: "live",
         },
       ],
@@ -796,25 +1020,39 @@ export async function getOperatorDashboardData(
     cost: {
       metrics: [
         {
-          label: "Tracked LLM cost",
-          value: formatUsd(totalTrackedLlmCost || null),
+          label: "LLM cost (period)",
+          value: llmCostTracked.length === 0 ? "—" : formatUsd(totalTrackedLlmCost),
           detail:
             llmCostTracked.length === 0
-              ? "Placeholder until request_cost_estimate_usd is populated."
-              : `Live from ${llmCostTracked.length} tracked generation events. ${estimatedLlmCostTracked.length} use provider-token-based USD estimates from the in-repo pricing snapshot.`,
+              ? "Not yet populated. request_cost_estimate_usd missing from product_events."
+              : `${llmCostTracked.length} generation events. ${estimatedLlmCostTracked.length} use provider-token-based estimates.`,
           status: llmCostTracked.length === 0 ? "placeholder" : "live",
+          delta: llmCostDelta?.text ?? null,
+          deltaDirection: llmCostDelta?.direction ?? "neutral",
         },
         {
-          label: "Astrology API cost by surface",
-          value: "Pending",
-          detail: "Placeholder until per-request astrology API cost is persisted.",
-          status: "placeholder",
+          label: "Cost per paid user",
+          value:
+            paidLlmUserIds.size > 0 && paidLlmCost > 0
+              ? formatUsd(paidLlmCost / paidLlmUserIds.size)
+              : "—",
+          detail:
+            paidLlmUserIds.size > 0
+              ? `${paidLlmUserIds.size} paid user${paidLlmUserIds.size !== 1 ? "s" : ""} with tracked LLM cost in this window.`
+              : "No paid user LLM cost tracked yet.",
+          status: paidLlmUserIds.size > 0 ? "live" : "placeholder",
         },
         {
-          label: "Gross margin by tier / surface / platform",
-          value: "Pending",
-          detail: "Placeholder until revenue allocation and cost estimates are both persisted.",
-          status: "placeholder",
+          label: "Cost per free user",
+          value:
+            freeLlmUserIds.size > 0 && freeLlmCost > 0
+              ? formatUsd(freeLlmCost / freeLlmUserIds.size)
+              : "—",
+          detail:
+            freeLlmUserIds.size > 0
+              ? `${freeLlmUserIds.size} free user${freeLlmUserIds.size !== 1 ? "s" : ""} with tracked LLM cost in this window.`
+              : "No free user LLM cost tracked yet.",
+          status: freeLlmUserIds.size > 0 ? "live" : "placeholder",
         },
       ],
       routingRows: routingMixRows,
@@ -822,27 +1060,27 @@ export async function getOperatorDashboardData(
     quality: {
       metrics: [
         {
-          label: "Today usefulness score",
+          label: "Today usefulness",
           value: formatDecimal(todayUsefulness, 2),
-          detail: `${filteredBriefingFeedback.length} feedback rows. Usefulness stays separate from predictive accuracy.`,
+          detail: `${filteredBriefingFeedback.length} feedback responses on Today briefings.`,
           status: "live",
         },
         {
-          label: "Ask usefulness score",
+          label: "Ask usefulness",
           value: formatDecimal(askUsefulness, 2),
-          detail: `${filteredDecisionFeedback.length} feedback rows. Usefulness stays separate from predictive accuracy.`,
+          detail: `${filteredDecisionFeedback.length} feedback responses on Ask sessions.`,
           status: "live",
         },
         {
           label: "Acted-on share",
           value: percentage(actedOnPositive, totalFeedbackCount),
-          detail: "Live from yes/partial feedback on Today and Ask.",
+          detail: "yes + partial feedback across Today and Ask.",
           status: "live",
         },
         {
-          label: "Complaint / harmful-output rate",
-          value: "Pending",
-          detail: "Placeholder until complaints and harmful-output incidents are persisted as first-class telemetry.",
+          label: "Complaint rate",
+          value: "—",
+          detail: "Not yet tracked. Add complaint events to product_events.",
           status: "placeholder",
         },
       ],

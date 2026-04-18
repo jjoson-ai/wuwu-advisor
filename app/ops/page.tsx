@@ -52,13 +52,14 @@ function buildFilters(
   };
 }
 
+/** Only renders a badge for non-live status — live is the default, no badge needed. */
 function StatusBadge({ status }: { status: "live" | "proxy" | "placeholder" }) {
+  if (status === "live") return null;
+
   const style =
-    status === "live"
-      ? { background: "rgba(31, 122, 79, 0.12)", color: "#1f5d43" }
-      : status === "proxy"
-        ? { background: "rgba(171, 132, 27, 0.12)", color: "#7c5a10" }
-        : { background: "rgba(123, 97, 65, 0.12)", color: "#6b5640" };
+    status === "proxy"
+      ? { background: "rgba(171, 132, 27, 0.12)", color: "#7c5a10" }
+      : { background: "rgba(123, 97, 65, 0.12)", color: "#6b5640" };
 
   return (
     <span
@@ -66,6 +67,7 @@ function StatusBadge({ status }: { status: "live" | "proxy" | "placeholder" }) {
         ...style,
         borderRadius: "999px",
         display: "inline-flex",
+        flexShrink: 0,
         fontSize: "0.72rem",
         fontWeight: 700,
         letterSpacing: "0.08em",
@@ -78,16 +80,16 @@ function StatusBadge({ status }: { status: "live" | "proxy" | "placeholder" }) {
   );
 }
 
-function MetricGrid({
-  metrics,
-}: {
-  metrics: Array<{
-    label: string;
-    value: string;
-    detail: string;
-    status: "live" | "proxy" | "placeholder";
-  }>;
-}) {
+type MetricCardProps = {
+  label: string;
+  value: string;
+  detail: string;
+  status: "live" | "proxy" | "placeholder";
+  delta?: string | null;
+  deltaDirection?: "up" | "down" | "neutral";
+};
+
+function MetricGrid({ metrics }: { metrics: MetricCardProps[] }) {
   return (
     <div
       style={{
@@ -114,6 +116,23 @@ function MetricGrid({
           <h3 className="card-title" style={{ margin: 0 }}>
             {metric.value}
           </h3>
+          {metric.delta ? (
+            <p
+              style={{
+                margin: 0,
+                fontSize: "0.8rem",
+                fontWeight: 600,
+                color:
+                  metric.deltaDirection === "up"
+                    ? "#1f5d43"
+                    : metric.deltaDirection === "down"
+                      ? "#c0392b"
+                      : "inherit",
+              }}
+            >
+              {metric.delta}
+            </p>
+          ) : null}
           <p className="muted" style={{ margin: 0 }}>
             {metric.detail}
           </p>
@@ -200,15 +219,13 @@ export default async function OpsPage({
     <div className="stack" style={{ gap: "1.5rem" }}>
       <section className="card card-featured card-hero stack">
         <p className="card-eyebrow" style={{ margin: 0 }}>
-          Internal Dashboard
+          Operator
         </p>
         <h1 className="page-title" style={{ margin: 0 }}>
-          Launch operator KPI dashboard
+          Wuwu metrics
         </h1>
         <p className="page-intro" style={{ margin: 0 }}>
-          Decision-useful launch view over first-party telemetry, billing state,
-          and feedback. Usefulness is tracked separately from predictive
-          accuracy.
+          Revenue minus cost, and the levers that move them.
         </p>
         <form
           className="card card-feature"
@@ -294,13 +311,14 @@ export default async function OpsPage({
             alignItems: "center",
           }}
         >
-          <StatusBadge status="live" />
-          <StatusBadge status="proxy" />
-          <StatusBadge status="placeholder" />
           <p className="muted" style={{ margin: 0 }}>
+            <StatusBadge status="proxy" />{" "}proxy = estimated &nbsp;
+            <StatusBadge status="placeholder" />{" "}placeholder = not yet tracked
+          </p>
+          <p className="muted" style={{ margin: 0, marginLeft: "auto" }}>
             Window: {dashboard.windowLabel}
           </p>
-          <a href="/ops/funnel" style={{ fontSize: "0.85rem", marginLeft: "auto" }}>
+          <a href="/ops/funnel" style={{ fontSize: "0.85rem" }}>
             Funnel &amp; retention →
           </a>
         </div>
@@ -322,10 +340,22 @@ export default async function OpsPage({
       <section className="stack">
         <div className="stack" style={{ gap: "0.3rem" }}>
           <p className="card-eyebrow" style={{ margin: 0 }}>
-            Revenue growth
+            P&amp;L
           </p>
           <h2 className="section-heading-serif" style={{ margin: 0 }}>
-            Conversion and paid growth
+            Revenue, cost, and margin
+          </h2>
+        </div>
+        <MetricGrid metrics={dashboard.profitability.metrics} />
+      </section>
+
+      <section className="stack">
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <p className="card-eyebrow" style={{ margin: 0 }}>
+            Revenue
+          </p>
+          <h2 className="section-heading-serif" style={{ margin: 0 }}>
+            Conversion and new paid
           </h2>
         </div>
         <MetricGrid metrics={dashboard.revenue.metrics} />
@@ -354,13 +384,26 @@ export default async function OpsPage({
       </section>
 
       <section className="stack">
-        <div className="stack" style={{ gap: "0.3rem" }}>
-          <p className="card-eyebrow" style={{ margin: 0 }}>
-            Retention & monetization quality
-          </p>
-          <h2 className="section-heading-serif" style={{ margin: 0 }}>
-            Paid continuity and retention proxy
-          </h2>
+        <div
+          style={{
+            alignItems: "baseline",
+            display: "flex",
+            gap: "1rem",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+          }}
+        >
+          <div className="stack" style={{ gap: "0.3rem" }}>
+            <p className="card-eyebrow" style={{ margin: 0 }}>
+              Retention
+            </p>
+            <h2 className="section-heading-serif" style={{ margin: 0 }}>
+              Paid continuity
+            </h2>
+          </div>
+          <a href="/ops/funnel" style={{ fontSize: "0.85rem", whiteSpace: "nowrap" }}>
+            Cohort table →
+          </a>
         </div>
         <MetricGrid metrics={dashboard.retention.metrics} />
       </section>
@@ -368,10 +411,10 @@ export default async function OpsPage({
       <section className="stack">
         <div className="stack" style={{ gap: "0.3rem" }}>
           <p className="card-eyebrow" style={{ margin: 0 }}>
-            Product usage & demand
+            Usage
           </p>
           <h2 className="section-heading-serif" style={{ margin: 0 }}>
-            Surface demand and Ask intensity
+            Surface demand and Ask depth
           </h2>
         </div>
         <MetricGrid metrics={dashboard.usage.metrics} />
@@ -389,10 +432,10 @@ export default async function OpsPage({
       <section className="stack">
         <div className="stack" style={{ gap: "0.3rem" }}>
           <p className="card-eyebrow" style={{ margin: 0 }}>
-            Cost & gross margin
+            Cost
           </p>
           <h2 className="section-heading-serif" style={{ margin: 0 }}>
-            Routing discipline first, cost detail second
+            LLM spend and routing mix
           </h2>
         </div>
         <MetricGrid metrics={dashboard.cost.metrics} />
@@ -410,10 +453,10 @@ export default async function OpsPage({
       <section className="stack">
         <div className="stack" style={{ gap: "0.3rem" }}>
           <p className="card-eyebrow" style={{ margin: 0 }}>
-            Quality & trust
+            Quality
           </p>
           <h2 className="section-heading-serif" style={{ margin: 0 }}>
-            Usefulness separate from predictive accuracy
+            Do users say the app helps them?
           </h2>
         </div>
         <MetricGrid metrics={dashboard.quality.metrics} />
