@@ -11,11 +11,14 @@ import type { BriefingFeedbackRow } from "@/domain/feedback/feedback.types";
 import type { UserForecastRow } from "@/domain/forecast/forecast.types";
 import { getOnboardingRecord } from "@/domain/profile/profile.service";
 import type {
+  DeleteAccountResult,
   DeleteDataRequestResponse,
   UserDataExport,
   UserDataInventory,
 } from "@/domain/privacy/privacy.types";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getStripeServerClient } from "@/lib/stripe";
 
 function formatDbError(error: PostgrestError | null, fallback: string) {
   if (error === null) {
@@ -244,5 +247,71 @@ export async function createDeleteDataRequestResponse(
       "Follow the DSAR and retention runbooks before marking the request complete.",
       "Local device tracking preferences must still be reset on each client separately.",
     ],
+  };
+}
+
+/**
+ * Permanently deletes a user account and all associated first-party data.
+ *
+ * Sequence:
+ * 1. Read Stripe identifiers from auth app_metadata.
+ * 2. If an active Stripe subscription exists, cancel it immediately.
+ *    Failure is non-fatal — the subscription may already be canceled/expired,
+ *    and Stripe webhooks provide a safety net.
+ * 3. Delete the auth user via the Supabase admin API.
+ *    ON DELETE CASCADE in the schema propagates the deletion to every
+ *    public.* table automatically (profiles, birth_data, daily_briefings,
+ *    briefing_feedback, user_blueprints, user_forecasts, ask_conversations,
+ *    ask_turns, decision_guidance, decision_guidance_feedback).
+ *
+ * Callers must sign the user out after this returns successfully.
+ */
+export async function deleteUserAccount(userId: string): Promise<DeleteAccountResult> {
+  const supabaseAdmin = getSupabaseAdminClient();
+
+  // Fetch user to extract Stripe metadata before the auth record is destroyed.
+  const userResult = await supabaseAdmin.auth.admin.getUserById(userId);
+
+  if (userResult.error !== null || userResult.data.user == null) {
+    throw new Error("Unable to load account for deletion.");
+  }
+
+  const user = userResult.data.user;
+  const stripeCustomerId =
+    (user.app_metadata?.stripe_customer_id as string | null | undefined) ?? null;
+  const stripeSubscriptionId =
+    (user.app_metadata?.stripe_subscription_id as string | null | undefined) ?? null;
+  const billingStatus =
+    (user.app_metadata?.billing_status as string | null | undefined) ?? null;
+
+  let stripeCanceled = false;
+
+  // Cancel active Stripe subscription so the user is not billed after deletion.
+  if (stripeSubscriptionId !== null && billingStatus === "active") {
+    try {
+      const stripe = getStripeServerClient();
+      await stripe.subscriptions.cancel(stripeSubscriptionId);
+      stripeCanceled = true;
+    } catch (stripeError) {
+      // Non-fatal: subscription may already be canceled or have expired.
+      // Stripe webhooks (customer.subscription.deleted) act as a safety net.
+      console.error(
+        "[privacy] Stripe subscription cancel failed during account deletion — proceeding:",
+        stripeError,
+      );
+    }
+  }
+
+  // Delete the auth user. Cascade rules remove all public.* rows automatically.
+  const deleteResult = await supabaseAdmin.auth.admin.deleteUser(userId);
+
+  if (deleteResult.error !== null) {
+    throw new Error(`Account deletion failed: ${deleteResult.error.message}`);
+  }
+
+  return {
+    deletedAt: new Date().toISOString(),
+    stripeCanceled,
+    stripeCustomerId,
   };
 }

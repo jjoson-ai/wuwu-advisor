@@ -327,7 +327,7 @@ export default async function BlueprintPage() {
                   statusLabel="Included in Pro"
                   title="Unlock your full Blueprint"
                   description="Pro unlocks the deeper pattern sections and the full signature data for a sharper, more specific read of how you decide."
-                  ctaLabel="Upgrade to Pro"
+                  ctaLabel="Start 7-day free trial"
                   feature="blueprint"
                   upgradeSurface="blueprint_consolidated_paywall"
                   bullets={lockedBullets}

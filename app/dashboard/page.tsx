@@ -334,7 +334,7 @@ export default async function DashboardPage() {
                 <UpgradeProButton
                   className="button"
                   feature="blueprint"
-                  label="Start 3-day free trial"
+                  label="Start 7-day free trial"
                   upgradeSurface="today_blueprint_nudge"
                 />
               </div>

@@ -25,9 +25,20 @@ import {
   isOnboardingComplete,
 } from "@/domain/profile/profile.service";
 import { buildNumerologyContext } from "@/domain/numerology/context";
+import { detectCrisisOutput } from "@/domain/safety/crisis-detection";
+import { logCrisisDetected } from "@/domain/safety/crisis-log";
+import {
+  classifyOutputSafety,
+  type SafetyClassifyContext,
+} from "@/domain/safety/output-safety";
+import {
+  logOutputSafetyBlocked,
+  logOutputSafetyFlagged,
+} from "@/domain/safety/output-safety-log";
 import { getRequestAuth } from "@/lib/auth";
 import { getRequestAccessState } from "@/lib/debug-access";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
+import { logLlmCost } from "@/lib/cost-events.server";
 import { getModelForPass } from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
 import { getRequestPlatform } from "@/lib/product-events";
@@ -187,6 +198,15 @@ export async function POST(request: Request) {
           structuredOutput: blueprintRequest.structuredOutput,
           maxOutputTokens: blueprintOutputDepth === "free" ? 1600 : 2400,
         });
+        logLlmCost({
+          meta: blueprintResult,
+          feature: "blueprint",
+          passLabel: "blueprint",
+          model: blueprintModel.model,
+          userId: user.id,
+          tier: accessState.accessLevel,
+          requestId,
+        });
 
         let blueprint;
 
@@ -236,6 +256,67 @@ export async function POST(request: Request) {
                 profile: humanDesignContext.chart.profile,
               },
         };
+
+        // Crisis detection — OUTPUT layer. Pure defense-in-depth (blueprint
+        // has no user text input). On trigger we log internally and fail
+        // soft; we do not show Care Mode UI to a user who didn't ask a
+        // crisis-adjacent question.
+        const blueprintText = JSON.stringify(blueprint);
+        const outputCrisis = detectCrisisOutput(blueprintText);
+
+        if (outputCrisis.triggered) {
+          void logCrisisDetected({
+            userId: user.id,
+            feature: "blueprint",
+            platform,
+            detection: outputCrisis,
+            requestId,
+          });
+
+          send({
+            type: "error",
+            message:
+              "We couldn't generate your Blueprint. Please try again in a moment.",
+          });
+          return;
+        }
+
+        // Output safety classifier — 1.8. Same fail-soft pattern as crisis:
+        // Blueprint has no user text input, so we log + surface a generic
+        // error rather than flash a safety card the user didn't provoke.
+        const safetyCtx: SafetyClassifyContext = {
+          userId: user.id,
+          tier: accessState.accessLevel,
+          feature: "blueprint",
+          requestId,
+        };
+        const outputSafety = await classifyOutputSafety(blueprintText, safetyCtx);
+
+        if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
+          void logOutputSafetyFlagged({
+            userId: user.id,
+            feature: "blueprint",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: blueprintModel.model,
+          });
+          void logOutputSafetyBlocked({
+            userId: user.id,
+            feature: "blueprint",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: blueprintModel.model,
+          });
+
+          send({
+            type: "error",
+            message:
+              "We couldn't generate your Blueprint. Please try again in a moment.",
+          });
+          return;
+        }
 
         const saveResult = await upsertBlueprint({
           userId: user.id,

@@ -2,6 +2,12 @@ import { z } from "zod";
 
 import type { DecisionGuidance } from "@/domain/decision/decision.types";
 import type { AskTurnRow } from "@/domain/decision/decision.types";
+import {
+  CULT_PHRASE_RULES,
+  FINANCIAL_SAFETY_RULES,
+  LIFE_DECISION_COACH_RULES,
+  isLifeStakesQuestion,
+} from "@/domain/safety/prompt-rules";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
 import { getModelForPass } from "@/lib/model-routing";
 
@@ -34,7 +40,20 @@ export function buildFollowUpRequest(params: {
   initialGuidance: DecisionGuidance;
   priorTurns: AskTurnRow[];
   newMessage: string;
+  // Retrieved from the memory pipeline; null when disabled or no facts exist.
+  rememberedFacts?: string | null;
 }) {
+  const lifeStakesDetected =
+    isLifeStakesQuestion(params.originalQuestion) ||
+    isLifeStakesQuestion(params.newMessage);
+
+  const lifeStakesReinforcement = lifeStakesDetected
+    ? [
+        "Deterministic life-stakes signal: this conversation touches an irreversible life decision. Decision Coach mode is mandatory.",
+        "Do not render a directive verdict on whether to leave, quit, end, stay, break up, move, sell, or disclose. Reflect the tension, surface one or two chart-based considerations, pose one or two concrete questions for the user to sit with, and name the appropriate human professional.",
+      ]
+    : [];
+
   const systemPrompt = [
     "You are a thoughtful astrologer continuing a follow-up conversation about a specific decision.",
     "The user has already received structured guidance on their question.",
@@ -44,6 +63,10 @@ export function buildFollowUpRequest(params: {
     "Be practical and precise. 2–3 paragraphs maximum.",
     "Do not use markdown. Do not use bullet points. Write in plain prose.",
     "Do not mention internal terms like 'synthesis pass', 'routing', or model names.",
+    ...FINANCIAL_SAFETY_RULES,
+    ...CULT_PHRASE_RULES,
+    ...LIFE_DECISION_COACH_RULES,
+    ...lifeStakesReinforcement,
   ].join("\n");
 
   const context: string[] = [
@@ -52,6 +75,12 @@ export function buildFollowUpRequest(params: {
     "Original guidance:",
     formatGuidanceSummary(params.initialGuidance),
   ];
+
+  // Inject remembered facts before prior turns so short-term context has
+  // priority over long-term memory when the model must choose.
+  if (params.rememberedFacts != null && params.rememberedFacts !== "") {
+    context.push("", params.rememberedFacts);
+  }
 
   const priorTurnsText = formatPriorTurns(params.priorTurns);
 

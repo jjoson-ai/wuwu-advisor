@@ -596,6 +596,14 @@ textarea {
 .header-brand {
   display: grid;
   gap: 0.18rem;
+  text-decoration: none;
+  color: inherit;
+  transition: opacity 0.15s ease;
+}
+
+.header-brand:hover,
+.header-brand:focus-visible {
+  opacity: 0.7;
 }
 
 .header-brand-mark {

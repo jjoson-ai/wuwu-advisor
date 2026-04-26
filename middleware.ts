@@ -3,8 +3,10 @@ import { NextResponse } from "next/server";
 
 import {
   ATTRIBUTION_COOKIE,
+  EMPTY_ATTRIBUTION,
   parseAttributionCookie,
   serializeAttributionCookie,
+  type AttributionClickIds,
 } from "@/lib/paid-media";
 import { isOpsSessionValid, OPS_AUTH_COOKIE } from "@/lib/ops-auth";
 
@@ -22,6 +24,33 @@ function getQueryValue(url: URL, key: string) {
 
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * Extract a bare host from a referer header. Returns null when referrer is
+ * same-origin or missing — we don't want to classify own-site navigation as
+ * "referral". Strips :port and lowercases.
+ */
+function extractExternalReferrerHost(
+  refererHeader: string | null,
+  selfHost: string | null,
+): string | null {
+  if (refererHeader == null || refererHeader === "") {
+    return null;
+  }
+
+  try {
+    const url = new URL(refererHeader);
+    const host = url.host.toLowerCase().replace(/:\d+$/, "");
+
+    if (selfHost !== null && host === selfHost) {
+      return null;
+    }
+
+    return host;
+  } catch {
+    return null;
+  }
 }
 
 export function middleware(request: NextRequest) {
@@ -44,28 +73,84 @@ export function middleware(request: NextRequest) {
   }
 
   const response = NextResponse.next();
-  const currentValue = request.cookies.get(ATTRIBUTION_COOKIE)?.value;
-  const existing = parseAttributionCookie(currentValue) ?? {
-    gclid: null,
-    gbraid: null,
-    wbraid: null,
-    fbclid: null,
-    captured_at: null,
-  };
 
-  const nextAttribution = {
-    gclid: existing.gclid ?? getQueryValue(request.nextUrl, "gclid"),
-    gbraid: existing.gbraid ?? getQueryValue(request.nextUrl, "gbraid"),
-    wbraid: existing.wbraid ?? getQueryValue(request.nextUrl, "wbraid"),
-    fbclid: existing.fbclid ?? getQueryValue(request.nextUrl, "fbclid"),
+  // Skip attribution capture on ops routes (internal traffic, not marketing
+  // touchpoints) and on API / static asset paths (attribution is about the
+  // landing page the human hit, not the first XHR that happens to fly).
+  if (
+    pathname.startsWith("/ops") ||
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/_next/")
+  ) {
+    return response;
+  }
+
+  const currentValue = request.cookies.get(ATTRIBUTION_COOKIE)?.value;
+  const existing = parseAttributionCookie(currentValue) ?? EMPTY_ATTRIBUTION;
+
+  // Extract inbound touch from this request. First-touch semantics: each
+  // field only sets if the existing cookie has null for it. So a user who
+  // first lands organic and later clicks a Google ad will have utm_* updated
+  // only if they were missing — which is the correct first-touch behavior.
+  const incomingGclid = getQueryValue(request.nextUrl, "gclid");
+  const incomingGbraid = getQueryValue(request.nextUrl, "gbraid");
+  const incomingWbraid = getQueryValue(request.nextUrl, "wbraid");
+  const incomingFbclid = getQueryValue(request.nextUrl, "fbclid");
+  const incomingUtmSource = getQueryValue(request.nextUrl, "utm_source");
+  const incomingUtmMedium = getQueryValue(request.nextUrl, "utm_medium");
+  const incomingUtmCampaign = getQueryValue(request.nextUrl, "utm_campaign");
+  const incomingUtmContent = getQueryValue(request.nextUrl, "utm_content");
+  const incomingUtmTerm = getQueryValue(request.nextUrl, "utm_term");
+
+  // Landing path + external referrer are only meaningful on the *first*
+  // server-rendered page view. We stamp them only if the cookie is brand new
+  // (all-null existing state). Subsequent pageviews don't clobber them.
+  const isFirstTouch =
+    existing.gclid === null &&
+    existing.gbraid === null &&
+    existing.wbraid === null &&
+    existing.fbclid === null &&
+    existing.utm_source === null &&
+    existing.utm_medium === null &&
+    existing.utm_campaign === null &&
+    existing.landing_path === null &&
+    existing.referrer_host === null &&
+    existing.captured_at === null;
+
+  const selfHost = request.nextUrl.host.toLowerCase().replace(/:\d+$/, "");
+  const externalReferrerHost = extractExternalReferrerHost(
+    request.headers.get("referer"),
+    selfHost,
+  );
+
+  const hasAnyInboundSignal =
+    incomingGclid !== null ||
+    incomingGbraid !== null ||
+    incomingWbraid !== null ||
+    incomingFbclid !== null ||
+    incomingUtmSource !== null ||
+    incomingUtmMedium !== null ||
+    incomingUtmCampaign !== null ||
+    incomingUtmContent !== null ||
+    incomingUtmTerm !== null ||
+    (isFirstTouch && externalReferrerHost !== null);
+
+  const nextAttribution: AttributionClickIds = {
+    gclid: existing.gclid ?? incomingGclid,
+    gbraid: existing.gbraid ?? incomingGbraid,
+    wbraid: existing.wbraid ?? incomingWbraid,
+    fbclid: existing.fbclid ?? incomingFbclid,
+    utm_source: existing.utm_source ?? incomingUtmSource,
+    utm_medium: existing.utm_medium ?? incomingUtmMedium,
+    utm_campaign: existing.utm_campaign ?? incomingUtmCampaign,
+    utm_content: existing.utm_content ?? incomingUtmContent,
+    utm_term: existing.utm_term ?? incomingUtmTerm,
+    landing_path:
+      existing.landing_path ?? (isFirstTouch ? pathname : null),
+    referrer_host:
+      existing.referrer_host ?? (isFirstTouch ? externalReferrerHost : null),
     captured_at:
-      existing.captured_at ??
-      (getQueryValue(request.nextUrl, "gclid") != null ||
-      getQueryValue(request.nextUrl, "gbraid") != null ||
-      getQueryValue(request.nextUrl, "wbraid") != null ||
-      getQueryValue(request.nextUrl, "fbclid") != null
-        ? new Date().toISOString()
-        : null),
+      existing.captured_at ?? (hasAnyInboundSignal ? new Date().toISOString() : null),
   };
 
   if (JSON.stringify(existing) !== JSON.stringify(nextAttribution)) {

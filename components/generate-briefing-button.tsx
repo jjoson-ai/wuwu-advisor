@@ -10,6 +10,8 @@ import { readGenerationStream } from "@/lib/client-generation-stream";
 import { GenerationLoadingState } from "@/components/generation-loading-state";
 import { UpgradeProButton } from "@/components/upgrade-pro-button";
 
+const GENERATION_TIMEOUT_MS = 90_000;
+
 type GenerateBriefingButtonProps = {
   canGenerateUnlimitedToday: boolean;
   todayRefreshesPerDay: number | null;
@@ -58,19 +60,26 @@ export function GenerateBriefingButton({
     setShowUpgradePrompt(false);
     setCurrentStage(null);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS);
+
     try {
       const response = await fetch("/api/generate-briefing", {
         method: "POST",
         headers: {
           [PRODUCT_PLATFORM_HEADER]: "web",
         },
+        signal: controller.signal,
       });
 
       if (response.headers.get("content-type")?.startsWith("text/event-stream")) {
+        let streamCompleted = false;
+
         for await (const event of readGenerationStream(response)) {
           if (event.type === "stage") {
             setCurrentStage(event.label);
           } else if (event.type === "done") {
+            streamCompleted = true;
             if (
               hasBriefing &&
               canGenerateUnlimitedToday === false &&
@@ -83,6 +92,10 @@ export function GenerateBriefingButton({
           } else if (event.type === "error") {
             throw new Error(event.message);
           }
+        }
+
+        if (!streamCompleted) {
+          throw new Error("Generation was interrupted. Please try again.");
         }
       } else {
         const payload = (await response.json()) as { error?: string };
@@ -101,11 +114,16 @@ export function GenerateBriefingButton({
 
         router.refresh();
       }
-    } catch (error) {
-      setError(
-        error instanceof Error ? error.message : "Unable to generate briefing.",
-      );
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        setError("This is taking longer than usual. Please try again.");
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Unable to generate briefing.",
+        );
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsSubmitting(false);
       setCurrentStage(null);
     }
@@ -139,16 +157,28 @@ export function GenerateBriefingButton({
           />
         ) : null}
       </div>
-      {error === null ? null : (
-        <p className="muted" style={{ margin: 0 }}>
-          {error}
-        </p>
-      )}
+      {error !== null ? (
+        <div className="stack" style={{ gap: "0.4rem" }}>
+          <p className="muted" style={{ margin: 0 }}>
+            {error}
+          </p>
+          {!showUpgradePrompt ? (
+            <button
+              className="button secondary"
+              onClick={handleClick}
+              style={{ alignSelf: "flex-start" }}
+              type="button"
+            >
+              Try again
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {showUpgradePrompt ? (
         <UpgradeProButton
           className="button secondary"
           feature="today"
-          label="Unlock Pro"
+          label="Start 7-day free trial"
           upgradeSurface="today_refresh_limit"
         />
       ) : null}

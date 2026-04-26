@@ -47,6 +47,14 @@ type ForecastTwoPassInput = {
   chineseAstrologySignal: ChineseAstrologySignal | null;
   horizon: ForecastHorizon;
   blueprintContext: unknown | null;
+  /**
+   * Optional per-user calibration fragment from
+   * `domain/accuracy/calibration.service.ts`. When non-null, spliced into the
+   * narrative system prompt so the forecast tunes to themes this user rates
+   * as hitting or missing. Not used by the signals extraction pass — signals
+   * should stay user-agnostic for prompt caching.
+   */
+  calibrationFragment?: string | null;
 };
 
 type ForecastNarrativeInput = ForecastTwoPassInput & {
@@ -118,6 +126,7 @@ function buildForecastNarrativeSystemPrompt(
   input: DailyBriefingInput,
   pass: GenerationPass,
   outputDepth: ForecastOutputDepth,
+  calibrationFragment: string | null = null,
 ) {
   return [
     "Return exactly one JSON object and nothing else.",
@@ -146,6 +155,7 @@ function buildForecastNarrativeSystemPrompt(
       ? "Keep the output shorter and simpler than the synthesize pass, but still grounded and planning-oriented."
       : "Use more nuance where the signals support it, but keep it compact.",
     `Tone preference: ${input.tone_preference}.`,
+    ...(calibrationFragment === null ? [] : [calibrationFragment]),
   ].join("\n\n");
 }
 
@@ -200,6 +210,7 @@ export function buildForecastNarrativeRequest(
       input.briefingInput,
       pass,
       outputDepth,
+      input.calibrationFragment ?? null,
     ),
     userPrompt: buildForecastNarrativeUserPrompt(input),
     cachedSystemBlock: buildForecastCachedContextBlock(input),

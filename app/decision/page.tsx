@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { DecisionFeedbackForm } from "@/components/decision-feedback-form";
 import { DecisionGuidanceForm } from "@/components/decision-guidance-form";
 import { MessageIcon } from "@/components/icons";
+import { getOverdueDecisionLogs } from "@/domain/decision/decision-log.service";
 import { getFeedbackForDecisionGuidance } from "@/domain/decision/decision-feedback.service";
 import {
   formatDecisionGuidanceForPage,
@@ -66,9 +67,14 @@ export default async function DecisionPage({
       ? resolvedSearchParams.id
       : null;
 
-  const [latestRow, recentRows] = await Promise.all([
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const [latestRow, recentRows, overdueFollowUps] = await Promise.all([
     getLatestDecisionGuidanceForUser(user.id),
     listRecentDecisionGuidanceForUser(user.id, 5),
+    // Best-effort: if 008 migration hasn't been run, getOverdueDecisionLogs
+    // returns [] silently. Never block the page.
+    getOverdueDecisionLogs(user.id, todayIso).catch(() => []),
   ]);
 
   const selectedRow =
@@ -118,15 +124,57 @@ export default async function DecisionPage({
           <span className="meta-pill">
             {access.featureAccess.canAskUnlimited
               ? "Unlimited questions"
-              : `${access.dailyUsageLimits.askQuestionsPerDay ?? 0} per day`}
+              : `${access.dailyUsageLimits.askQuestionsPerDay ?? 0}/day + 1 big decision/week`}
           </span>
         </div>
       </section>
+
+      {/* Overdue follow-up banner */}
+      {overdueFollowUps.length > 0 ? (
+        <section className="card stack" style={{ background: "var(--surface-muted)" }}>
+          <div className="stack" style={{ gap: "0.3rem" }}>
+            <p className="card-eyebrow" style={{ margin: 0 }}>
+              Check-back{overdueFollowUps.length > 1 ? "s" : ""}
+            </p>
+            <h2 style={{ margin: 0 }}>
+              {overdueFollowUps.length === 1
+                ? "How did that decision go?"
+                : `${overdueFollowUps.length} decisions are ready for check-back`}
+            </h2>
+            <p className="muted" style={{ margin: 0 }}>
+              {overdueFollowUps.length === 1
+                ? `You committed to: "${overdueFollowUps[0]!.committed_action}"`
+                : "Tap a decision below to record how it went."}
+            </p>
+          </div>
+          <div className="stack" style={{ gap: "0.5rem" }}>
+            {overdueFollowUps.map((log) => (
+              <Link
+                key={log.id}
+                href={`/decision/${log.decision_guidance_id}`}
+                className="card card-muted"
+                style={{ padding: "0.75rem 1rem", display: "block" }}
+              >
+                <p style={{ margin: 0, fontWeight: 500, fontSize: "0.95rem" }}>
+                  {log.committed_action}
+                </p>
+                <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+                  Due {new Date(log.revisit_at + "T12:00:00").toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })} · tap to record outcome →
+                </p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {latest === null ? (
         /* First time: form leads */
         <>
           <DecisionGuidanceForm
+            askBigDecisionPerWeek={access.dailyUsageLimits.askBigDecisionPerWeek}
             askQuestionsPerDay={access.dailyUsageLimits.askQuestionsPerDay}
             canAskUnlimited={access.featureAccess.canAskUnlimited}
             userKey={user.id}
@@ -279,6 +327,7 @@ export default async function DecisionPage({
 
           {/* Form moved below the answer — "ask another question" */}
           <DecisionGuidanceForm
+            askBigDecisionPerWeek={access.dailyUsageLimits.askBigDecisionPerWeek}
             askQuestionsPerDay={access.dailyUsageLimits.askQuestionsPerDay}
             canAskUnlimited={access.featureAccess.canAskUnlimited}
             userKey={user.id}

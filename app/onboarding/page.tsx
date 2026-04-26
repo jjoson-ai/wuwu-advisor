@@ -15,7 +15,7 @@ import {
   getOnboardingRecord,
   isOnboardingComplete,
 } from "@/domain/profile/profile.service";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, isAgeVerified } from "@/lib/auth";
 import { PRODUCT_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
@@ -45,6 +45,10 @@ export default async function OnboardingPage() {
 
   if (user === null) {
     redirect("/login");
+  }
+
+  if (!isAgeVerified(user)) {
+    redirect("/age-gate?next=/onboarding");
   }
 
   const record = await getOnboardingRecord(user.id);

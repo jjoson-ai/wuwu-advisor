@@ -8,6 +8,11 @@ import type {
 } from "@/domain/feedback/feedback.types";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
+// Single source of truth for the column list we pull back. Matches
+// BriefingFeedbackRow so the cast in the helpers below stays honest.
+const BRIEFING_FEEDBACK_COLUMNS =
+  "id, briefing_id, user_id, rating_emoji, rating_theme_hit, rating_theme_miss, usefulness_score, acted_on, note, created_at";
+
 function formatDbError(error: PostgrestError | null, fallback: string) {
   if (error === null) {
     return fallback;
@@ -21,7 +26,15 @@ function formatDbError(error: PostgrestError | null, fallback: string) {
   if (error.code === "PGRST205" || error.message.includes("schema cache")) {
     const relationLabel = relationName ?? "the required tables";
 
-    return `Supabase setup error: could not find public.${relationLabel} in the connected project. Rerun sql/001_init.sql in Supabase, verify public.briefing_feedback exists, and confirm your local Supabase env values point to that same project.`;
+    return `Supabase setup error: could not find public.${relationLabel} in the connected project. Rerun sql/001_init.sql + sql/006_briefing_rating.sql in Supabase, verify public.briefing_feedback exists with rating_emoji column, and confirm your local Supabase env values point to that same project.`;
+  }
+
+  // Column-missing error — user hasn't run 006 yet.
+  if (
+    error.code === "42703" ||
+    /column .* does not exist/i.test(error.message)
+  ) {
+    return "Supabase setup error: briefing_feedback is missing the rating columns. Rerun sql/006_briefing_rating.sql in your connected Supabase project.";
   }
 
   return error.message || fallback;
@@ -35,7 +48,7 @@ export async function getFeedbackForBriefing(
   const supabase = await getSupabaseServerClient(accessToken ?? undefined);
   const result = await supabase
     .from("briefing_feedback")
-    .select("id, briefing_id, user_id, usefulness_score, acted_on, note, created_at")
+    .select(BRIEFING_FEEDBACK_COLUMNS)
     .eq("user_id", userId)
     .eq("briefing_id", briefingId)
     .maybeSingle();
@@ -60,13 +73,19 @@ export async function upsertBriefingFeedback(
       {
         briefing_id: input.briefingId,
         user_id: input.userId,
-        usefulness_score: input.usefulnessScore,
-        acted_on: input.actedOn,
+        rating_emoji: input.ratingEmoji,
+        rating_theme_hit: input.ratingThemeHit,
+        rating_theme_miss: input.ratingThemeMiss,
+        // Legacy columns are now nullable (see 006_briefing_rating.sql).
+        // Explicitly null them out so an upsert that replaces a legacy row
+        // with a new-shape row doesn't leave a stale 1-5 score lying around.
+        usefulness_score: null,
+        acted_on: null,
         note: input.note,
       },
       { onConflict: "briefing_id,user_id" },
     )
-    .select("id, briefing_id, user_id, usefulness_score, acted_on, note, created_at")
+    .select(BRIEFING_FEEDBACK_COLUMNS)
     .single();
 
   if (result.error !== null) {

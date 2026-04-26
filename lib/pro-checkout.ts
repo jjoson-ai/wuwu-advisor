@@ -5,6 +5,7 @@ import { trackGooglePaidMediaEvent } from "@/lib/paid-media.client";
 
 type StartProCheckoutInput = {
   upgradeSurface: string;
+  plan?: "monthly" | "annual";
 };
 
 type CheckoutResponse = {
@@ -25,6 +26,7 @@ export async function startProCheckout(input: StartProCheckoutInput) {
     body: JSON.stringify({
       returnPath: getCurrentReturnPath(),
       upgradeSurface: input.upgradeSurface,
+      plan: input.plan ?? "annual",
     }),
   });
 

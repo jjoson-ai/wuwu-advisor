@@ -69,14 +69,32 @@ export type FormattedTodayBriefing = {
   created_at: string;
 };
 
+// Legacy 1-5 + acted_on shape. Still used by the Decision Guidance feedback
+// form, so the type stays exported. Briefing feedback has moved to the new
+// emoji rating shape below.
 export type ActedOnValue = "yes" | "partial" | "no";
+
+// New briefing-rating shape — mirrors domain/feedback/feedback.types.ts.
+export type RatingEmojiValue = "nailed_it" | "vague" | "off";
+export type RatingThemeValue =
+  | "career"
+  | "money"
+  | "relationships"
+  | "health"
+  | "personal_growth"
+  | "timing";
 
 export type BriefingFeedback = {
   id: string;
   briefing_id: string;
   user_id: string;
-  usefulness_score: number;
-  acted_on: ActedOnValue;
+  // New rating shape. Null on legacy rows migrated before 5.2 Phase A.
+  rating_emoji: RatingEmojiValue | null;
+  rating_theme_hit: RatingThemeValue[];
+  rating_theme_miss: RatingThemeValue[];
+  // Legacy 1-5 shape. Null on new rows.
+  usefulness_score: number | null;
+  acted_on: ActedOnValue | null;
   note: string | null;
   created_at: string;
 };
@@ -92,8 +110,9 @@ export type GenerateTodayResponse = {
 
 export type SubmitTodayFeedbackRequest = {
   briefingId: string;
-  usefulnessScore: number;
-  actedOn: ActedOnValue;
+  ratingEmoji: RatingEmojiValue;
+  ratingThemeHit: RatingThemeValue[];
+  ratingThemeMiss: RatingThemeValue[];
   note: string | null;
 };
 

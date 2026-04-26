@@ -24,6 +24,25 @@ import {
   buildDecisionSafetyResponse,
   classifyDecisionSafety,
 } from "@/domain/decision/decision.safety";
+import { buildCareModePayload } from "@/domain/safety/care-mode";
+import {
+  detectCrisisInput,
+  detectCrisisOutput,
+} from "@/domain/safety/crisis-detection";
+import {
+  logCareModeShown,
+  logCrisisDetected,
+} from "@/domain/safety/crisis-log";
+import { markCrisisTriggered } from "@/domain/safety/crisis-window";
+import {
+  buildOutputSafetyBlockPayload,
+  classifyOutputSafety,
+  type SafetyClassifyContext,
+} from "@/domain/safety/output-safety";
+import {
+  logOutputSafetyBlocked,
+  logOutputSafetyFlagged,
+} from "@/domain/safety/output-safety-log";
 import {
   buildDecisionAgentRequest,
   validateDecisionGuidanceOutput,
@@ -51,6 +70,7 @@ import {
 import { getRequestAuth } from "@/lib/auth";
 import { getRequestAccessState } from "@/lib/debug-access";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
+import { logLlmCost } from "@/lib/cost-events.server";
 import { getModelRoutingDecision } from "@/lib/model-decision";
 import { getModelForPass } from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
@@ -59,6 +79,9 @@ import { logProductEvent } from "@/lib/product-events.server";
 import { toRoutingEventScores } from "@/lib/routing-events";
 import { logRoutingEvent } from "@/lib/routing-events.server";
 import { getLatestBriefingForUser } from "@/domain/briefing/briefing.service";
+import { runExtractionPipeline } from "@/domain/memory/facts.store";
+import { retrieveRelevantFacts } from "@/domain/memory/facts.retrieve";
+import { formatFactsForPrompt } from "@/domain/memory/facts.inject";
 import { isSupportedTimeZone } from "@/lib/timezones";
 
 function getDateContext(timezone: string) {
@@ -110,6 +133,31 @@ export async function POST(request: Request) {
         { error: "A question is required." },
         { status: 400 },
       );
+    }
+
+    // Crisis detection — INPUT layer. Runs BEFORE classifyDecisionSafety so
+    // Care Mode takes precedence over the generic self_harm response.
+    const inputCrisis = detectCrisisInput(question);
+
+    if (inputCrisis.triggered) {
+      void logCrisisDetected({
+        userId: user.id,
+        feature: "ask",
+        platform,
+        detection: inputCrisis,
+        requestId,
+      });
+      void logCareModeShown({
+        userId: user.id,
+        feature: "ask",
+        platform,
+        requestId,
+      });
+      void markCrisisTriggered(user.id);
+
+      return NextResponse.json({
+        care_mode: buildCareModePayload(inputCrisis.severity),
+      });
     }
 
     const safetyCategory = classifyDecisionSafety(question);
@@ -214,13 +262,19 @@ export async function POST(request: Request) {
           latestBlueprintRow,
           latestDecisionGuidance,
           recentAskCount,
+          relevantFacts,
         ] = await Promise.all([
           getLatestBriefingForUser(user.id, accessToken),
           getForecastForUser(user.id, accessToken),
           getBlueprintForUser(user.id, accessToken),
           getLatestDecisionGuidanceForUser(user.id, accessToken),
           countDecisionGuidanceForUser(user.id, accessToken),
+          // Memory retrieval runs in parallel with context fetching.
+          // Returns [] when injection is disabled or no facts exist.
+          retrieveRelevantFacts(user.id, question),
         ]);
+
+        const rememberedFacts = formatFactsForPrompt(relevantFacts);
         const formattedForecast =
           latestForecastRow === null ? null : formatForecastForPage(latestForecastRow);
         const formattedBlueprint =
@@ -247,6 +301,7 @@ export async function POST(request: Request) {
           latestBriefing: generationContext.latestBriefing,
           latestForecast: generationContext.latestForecast,
           latestBlueprint: generationContext.latestBlueprint,
+          rememberedFacts: rememberedFacts !== "" ? rememberedFacts : null,
         };
 
         let guidance: DecisionGuidance;
@@ -263,8 +318,20 @@ export async function POST(request: Request) {
           }
         }
 
+        const extractModel = getModelForPass("extract");
+
         try {
+          const signalsStart = Date.now();
           const signalsResult = await generateAskSignals(decisionInput);
+          logLlmCost({
+            meta: { ...signalsResult, duration_ms: Date.now() - signalsStart },
+            feature: "decision_guidance",
+            passLabel: "signals",
+            model: extractModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
           const signals = signalsResult.data;
 
           if (hasStrongDecisionSignals(signals) === false) {
@@ -283,6 +350,7 @@ export async function POST(request: Request) {
             },
           });
 
+          const guidanceStart = Date.now();
           const guidanceResult = routingDecision.useFrontier
             ? await generateAskGuidanceFrontier({
                 ...decisionInput,
@@ -292,6 +360,15 @@ export async function POST(request: Request) {
                 ...decisionInput,
                 signals,
               });
+          logLlmCost({
+            meta: { ...guidanceResult, duration_ms: Date.now() - guidanceStart },
+            feature: "decision_guidance",
+            passLabel: "guidance",
+            model: routingDecision.useFrontier ? frontierModel.model : cheapModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
           guidance = guidanceResult.data;
           requestCostEstimateUsd = sumEstimatedCosts([
             signalsResult.estimatedCostUsd,
@@ -334,6 +411,15 @@ export async function POST(request: Request) {
             structuredOutput: decisionRequest.structuredOutput,
             maxOutputTokens: 1400,
           });
+          logLlmCost({
+            meta: decisionResult,
+            feature: "decision_guidance",
+            passLabel: "guidance",
+            model: frontierModel.model,
+            userId: user.id,
+            tier: accessState.accessLevel,
+            requestId,
+          });
 
           try {
             guidance = validateDecisionGuidanceOutput(decisionResult.parsedJson);
@@ -367,6 +453,85 @@ export async function POST(request: Request) {
             forced_frontier_reasons: routingDecision?.forcedFrontierReasons ?? [],
             tone_preference: briefingInput.tone_preference,
           });
+        }
+
+        // Crisis detection — OUTPUT layer. Defense-in-depth: the prompt
+        // rules forbid self-harm language, but we still scan every text
+        // field the model produced. If anything slips, we drop the guidance
+        // and serve Care Mode instead.
+        const guidanceText = JSON.stringify(guidance);
+        const outputCrisis = detectCrisisOutput(guidanceText);
+
+        if (outputCrisis.triggered) {
+          void logCrisisDetected({
+            userId: user.id,
+            feature: "ask",
+            platform,
+            detection: outputCrisis,
+            requestId,
+          });
+          void logCareModeShown({
+            userId: user.id,
+            feature: "ask",
+            platform,
+            requestId,
+          });
+          void markCrisisTriggered(user.id);
+
+          send({
+            type: "done",
+            payload: {
+              care_mode: buildCareModePayload(outputCrisis.severity),
+            },
+          });
+          return;
+        }
+
+        // Output safety classifier — 1.8. Scans for the seven banned
+        // categories (medical prediction, fatalistic determinism, identity
+        // pathologizing, protected-class generalization, specific financial
+        // instrument, directive life verdict, predictive death/pregnancy).
+        // On flag: discard the guidance, skip save, send safety_block.
+        const safetyCtx: SafetyClassifyContext = {
+          userId: user.id,
+          tier: accessState.accessLevel,
+          feature: "decision_guidance",
+          requestId,
+        };
+        const outputSafety = await classifyOutputSafety(guidanceText, safetyCtx);
+
+        if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
+          const finalModel = (
+            fallbackReason !== null
+              ? frontierModel.model
+              : routingDecision?.useFrontier === true
+                ? frontierModel.model
+                : cheapModel.model
+          );
+          void logOutputSafetyFlagged({
+            userId: user.id,
+            feature: "ask",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: finalModel,
+          });
+          void logOutputSafetyBlocked({
+            userId: user.id,
+            feature: "ask",
+            platform,
+            requestId,
+            result: outputSafety,
+            modelUsed: finalModel,
+          });
+
+          send({
+            type: "done",
+            payload: {
+              safety_block: buildOutputSafetyBlockPayload(outputSafety.category),
+            },
+          });
+          return;
         }
 
         const saveResult = await insertDecisionGuidance({
@@ -466,6 +631,16 @@ export async function POST(request: Request) {
             repeat_within_24h: repeatedAskWithin24Hours,
           });
         }
+
+        // Fire-and-forget memory extraction. The initial Ask question is
+        // typically the richest source of durable facts. Runs after save so
+        // the conversationId is available. Never blocks the response.
+        void runExtractionPipeline({
+          userId: user.id,
+          conversationId: saveResult.conversationId,
+          userMessage: question,
+          assistantResponse: JSON.stringify(saveResult.guidance),
+        });
 
         revalidatePath("/decision");
         send({

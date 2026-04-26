@@ -1,4 +1,5 @@
 import { cache } from "react";
+import type { User } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 
 import { getSupabaseServerClient } from "@/lib/supabase/server";
@@ -69,4 +70,24 @@ export async function getRequestAuth(request: Request) {
 export async function getRequestUser(request: Request) {
   const { user } = await getRequestAuth(request);
   return user;
+}
+
+/**
+ * Returns true when the user has submitted a DOB that places them at or
+ * above AGE_GATE_MINIMUM_AGE (18).
+ *
+ * We explicitly check `age_verified_dob` — the flag set by the DOB-based
+ * gate in `/app/age-gate/actions.ts`. The legacy `age_verified` flag
+ * (set by the prior self-attestation "I'm 17+" button) is intentionally
+ * NOT honored: with the SB 243 / COPPA upgrade to a 18+ DOB gate, every
+ * user must re-verify with a real date of birth. Users who predate the
+ * DOB gate will be routed to `/age-gate` on their next visit.
+ *
+ * Stored in Supabase auth app_metadata (admin-only, same as billing
+ * status) so it survives without a DB migration and is available before
+ * a profile row exists.
+ */
+export function isAgeVerified(user: User | null): boolean {
+  if (user === null) return false;
+  return user.app_metadata?.age_verified_dob === true;
 }

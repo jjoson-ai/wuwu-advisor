@@ -27,6 +27,14 @@ type SynthesisAgentInput = {
   westernModalitySignal: ModalitySignal;
   westernOutput: WesternOutput;
   timingOutput: TimingOutput;
+  /**
+   * Optional per-user calibration fragment from
+   * `domain/accuracy/calibration.service.ts`. When non-null, gets spliced into
+   * the synthesis system prompt so the final briefing tunes to the themes
+   * this user has rated as hitting or missing. See that module for the gate
+   * logic (env flag + minimum rating volume).
+   */
+  calibrationFragment?: string | null;
 };
 
 export function buildSynthesisAgentRequest(input: SynthesisAgentInput) {
@@ -35,7 +43,10 @@ export function buildSynthesisAgentRequest(input: SynthesisAgentInput) {
   const timingOutput = TimingOutputSchema.parse(input.timingOutput);
 
   return {
-    systemPrompt: synthesisSystemPrompt(briefingInput),
+    systemPrompt: synthesisSystemPrompt(
+      briefingInput,
+      input.calibrationFragment ?? null,
+    ),
     userPrompt: buildSynthesisUserPrompt({
       briefingInput,
       astrologyContext: input.astrologyContext,

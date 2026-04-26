@@ -145,15 +145,17 @@ function MetricGrid({ metrics }: { metrics: MetricCardProps[] }) {
 function DataTable({
   headers,
   rows,
+  emptyMessage,
 }: {
   headers: string[];
   rows: string[][];
+  emptyMessage?: string;
 }) {
   if (rows.length === 0) {
     return (
       <div className="card card-feature">
         <p className="muted" style={{ margin: 0 }}>
-          No matching rows for the current filters.
+          {emptyMessage ?? "No matching rows for the current filters."}
         </p>
       </div>
     );
@@ -381,6 +383,38 @@ export default async function OpsPage({
             row.paywallToPaidRate,
           ])}
         />
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <p className="card-eyebrow" style={{ margin: 0 }}>
+            By channel
+          </p>
+          <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
+            First-touch attribution snapshot from the acquisition cookie.
+            Channels: <code>google_paid</code> (gclid), <code>meta_paid</code>{" "}
+            (fbclid), <code>other_paid</code> (UTM), <code>organic_search</code>,{" "}
+            <code>referral</code>, <code>direct</code>.
+            CPA / LTV-by-channel unlock once <code>channel_spend</code> is
+            ingested (see roadmap 2.5).
+          </p>
+        </div>
+        <DataTable
+          headers={[
+            "Channel",
+            "Signups",
+            "Paywalls",
+            "Starts",
+            "Paid activations",
+            "Paywall → Paid",
+          ]}
+          rows={dashboard.revenue.channelRows.map((row) => [
+            row.channel,
+            `${row.signups}`,
+            `${row.paywallShown}`,
+            `${row.checkoutStarted}`,
+            `${row.paidActivations}`,
+            row.paywallToPaidRate,
+          ])}
+          emptyMessage="No attribution data yet. Will populate as users arrive with UTM params or click IDs (gclid / fbclid)."
+        />
       </section>
 
       <section className="stack">
@@ -427,6 +461,24 @@ export default async function OpsPage({
             `${row.repeatWithin24h}`,
           ])}
         />
+      </section>
+
+      <section className="stack">
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <p className="card-eyebrow" style={{ margin: 0 }}>
+            Moat engagement
+          </p>
+          <h2 className="section-heading-serif" style={{ margin: 0 }}>
+            Decision log · Accuracy report · Briefing ratings
+          </h2>
+        </div>
+        <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+          Leading indicators of longitudinal value — the mechanics that justify
+          a 7-day trial and differentiate Wuwu from a generic AI chat
+          substitute. Target: ≥30% of Pro users log ≥1 decision per week;
+          ≥20% view Accuracy Report within 30 days of signup.
+        </p>
+        <MetricGrid metrics={dashboard.usage.moatMetrics} />
       </section>
 
       <section className="stack">

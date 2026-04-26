@@ -4,6 +4,13 @@ import type { LlmProvider } from "@/lib/model-routing";
 type GenerateJsonInput = {
   systemPrompt: string;
   userPrompt: string;
+  /**
+   * Optional stable prefix content (e.g. natal chart context) that is
+   * prepended to the system prompt as a cacheable block via Anthropic
+   * prompt caching. Must be >= 1024 tokens for Haiku/Sonnet to cache
+   * effectively; shorter blocks are still sent but won't hit the cache.
+   */
+  cachedSystemBlock?: string;
   provider?: LlmProvider;
   model?: string;
   maxOutputTokens?: number;
@@ -24,6 +31,8 @@ type AnthropicResponse = {
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
   };
   content?: Array<{
     type?: string;
@@ -35,13 +44,44 @@ export type LlmUsage = {
   input_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
 };
+
+/**
+ * Build the Anthropic `system` field. If a cacheable block is provided,
+ * emits an array of content blocks with `cache_control: ephemeral` on
+ * the cacheable prefix so subsequent identical-prefix requests hit the
+ * 5-min prompt cache. Otherwise falls back to the simple string form.
+ */
+function buildAnthropicSystemField(
+  systemPrompt: string,
+  cachedSystemBlock: string | undefined,
+) {
+  if (cachedSystemBlock == null || cachedSystemBlock === "") {
+    return systemPrompt;
+  }
+
+  return [
+    {
+      type: "text" as const,
+      text: cachedSystemBlock,
+      cache_control: { type: "ephemeral" as const },
+    },
+    {
+      type: "text" as const,
+      text: systemPrompt,
+    },
+  ];
+}
 
 export type GenerateJsonResultMeta = {
   parsedJson: unknown;
   usage: LlmUsage | null;
   estimatedCostUsd: number | null;
   costIsEstimated: boolean;
+  /** Wall-clock duration of the Anthropic API call in milliseconds. */
+  duration_ms: number;
 };
 
 type ModelPricingEntry = {
@@ -69,6 +109,50 @@ function getAnthropicConfig(model?: string) {
   }
 
   return { apiKey, model: resolvedModel };
+}
+
+/**
+ * Zero Data Retention (ZDR) — documentation anchor.
+ *
+ * Anthropic ZDR is an organisation-level agreement negotiated with the
+ * Anthropic sales team (https://claude.com/contact-sales).  There is no
+ * self-serve Console toggle and no per-request header to opt in.  Once the
+ * agreement is in place, ZDR applies automatically to all eligible API calls
+ * from the organisation — nothing extra is needed in the request headers.
+ *
+ * ANTHROPIC_ZDR_ENABLED=true is therefore a documentation / audit flag only:
+ * it signals that the account has an active ZDR arrangement and serves as a
+ * reminder to ops that the Anthropic agreement must be in place.  It does not
+ * change the outgoing HTTP request.
+ *
+ * Ineligible features (no ZDR even with agreement): Batch API, Files API,
+ * Code Execution.  All other Messages API calls are eligible.
+ */
+// Log ZDR status once per module load (once per cold-start in serverless).
+// This gives ops a clear signal in startup / first-request logs without
+// spamming every subsequent call.
+(function logZdrStatus() {
+  const zdrEnabled =
+    process.env.ANTHROPIC_ZDR_ENABLED?.toLowerCase() === "true";
+
+  if (zdrEnabled) {
+    console.info(
+      "[llm] ANTHROPIC_ZDR_ENABLED=true — org-level ZDR agreement is marked active. " +
+        "All eligible Messages API calls will be processed with zero data retention.",
+    );
+  } else {
+    console.warn(
+      "[llm] ANTHROPIC_ZDR_ENABLED is not set or false — Anthropic ZDR agreement " +
+        "is NOT active. Set ANTHROPIC_ZDR_ENABLED=true once the org-level ZDR " +
+        "agreement is in place (contact Anthropic sales: https://claude.com/contact-sales).",
+    );
+  }
+})();
+
+function getAnthropicZdrHeaders(): Record<string, string> {
+  // No per-request header exists for ZDR — return an empty object.
+  // See the module-level IIFE above for the one-time startup log.
+  return {};
 }
 
 function stripCodeFences(text: string) {
@@ -197,6 +281,14 @@ function getAnthropicUsage(response: AnthropicResponse): LlmUsage | null {
     typeof response.usage.output_tokens === "number"
       ? response.usage.output_tokens
       : null;
+  const cacheCreationInputTokens =
+    typeof response.usage.cache_creation_input_tokens === "number"
+      ? response.usage.cache_creation_input_tokens
+      : null;
+  const cacheReadInputTokens =
+    typeof response.usage.cache_read_input_tokens === "number"
+      ? response.usage.cache_read_input_tokens
+      : null;
 
   return {
     input_tokens: inputTokens,
@@ -205,6 +297,8 @@ function getAnthropicUsage(response: AnthropicResponse): LlmUsage | null {
       inputTokens != null && outputTokens != null
         ? inputTokens + outputTokens
         : null,
+    cache_creation_input_tokens: cacheCreationInputTokens,
+    cache_read_input_tokens: cacheReadInputTokens,
   };
 }
 
@@ -236,6 +330,7 @@ function estimateCostUsd(model: string, usage: LlmUsage | null) {
 export async function generateJsonObjectWithMeta({
   systemPrompt,
   userPrompt,
+  cachedSystemBlock,
   provider = "anthropic",
   model,
   maxOutputTokens = 1200,
@@ -247,16 +342,18 @@ export async function generateJsonObjectWithMeta({
   }
 
   const config = getAnthropicConfig(model);
+  const startMs = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
+      ...getAnthropicZdrHeaders(),
     },
     body: JSON.stringify({
       model: config.model,
-      system: systemPrompt,
+      system: buildAnthropicSystemField(systemPrompt, cachedSystemBlock),
       messages: [
         {
           role: "user",
@@ -282,6 +379,7 @@ export async function generateJsonObjectWithMeta({
     usage,
     estimatedCostUsd: estimateCostUsd(config.model, usage),
     costIsEstimated: true,
+    duration_ms: Date.now() - startMs,
   };
 }
 
@@ -304,6 +402,7 @@ export async function generateTextStream({
   model,
   systemPrompt,
   userPrompt,
+  cachedSystemBlock,
   maxOutputTokens = 1200,
   onChunk,
 }: {
@@ -311,24 +410,27 @@ export async function generateTextStream({
   model?: string;
   systemPrompt: string;
   userPrompt: string;
+  cachedSystemBlock?: string;
   maxOutputTokens?: number;
   onChunk: (text: string) => void;
-}): Promise<{ usage: LlmUsage | null; estimatedCostUsd: number | null; costIsEstimated: boolean }> {
+}): Promise<{ usage: LlmUsage | null; estimatedCostUsd: number | null; costIsEstimated: boolean; duration_ms: number }> {
   if (provider !== "anthropic") {
     throw new Error(`Unsupported provider: ${provider}. Only Anthropic is supported.`);
   }
 
   const config = getAnthropicConfig(model);
+  const startMs = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
+      ...getAnthropicZdrHeaders(),
     },
     body: JSON.stringify({
       model: config.model,
-      system: systemPrompt,
+      system: buildAnthropicSystemField(systemPrompt, cachedSystemBlock),
       messages: [{ role: "user", content: userPrompt }],
       max_tokens: maxOutputTokens,
       stream: true,
@@ -414,5 +516,6 @@ export async function generateTextStream({
     usage,
     estimatedCostUsd: estimateCostUsd(config.model, usage),
     costIsEstimated: true,
+    duration_ms: Date.now() - startMs,
   };
 }

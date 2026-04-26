@@ -59,6 +59,10 @@ type ProductEventRow = {
   request_cost_is_estimated: boolean | null;
   is_first_use: boolean | null;
   repeat_within_24h: boolean | null;
+  attribution_channel: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
 };
 
 type RoutingEventRow = {
@@ -74,8 +78,13 @@ type RoutingEventRow = {
 
 type BriefingFeedbackRow = {
   briefing_id: string;
-  usefulness_score: number;
-  acted_on: "yes" | "partial" | "no";
+  // New emoji rating shape (5.2 Phase A). Null on legacy rows.
+  rating_emoji: "nailed_it" | "vague" | "off" | null;
+  rating_theme_hit: string[] | null;
+  rating_theme_miss: string[] | null;
+  // Legacy 1-5 score / acted_on. Null on new rows.
+  usefulness_score: number | null;
+  acted_on: "yes" | "partial" | "no" | null;
   note: string | null;
   created_at: string;
 };
@@ -116,6 +125,17 @@ type UsageRow = {
   repeatWithin24h: number;
 };
 
+/** Per-channel attribution rollup used by the Acquisition → By channel card. */
+type ChannelRow = {
+  channel: string;
+  signups: number;
+  paidActivations: number;
+  paywallShown: number;
+  checkoutStarted: number;
+  checkoutCompleted: number;
+  paywallToPaidRate: string;
+};
+
 type RoutingMixRow = {
   modelFamily: string;
   requests: number;
@@ -138,6 +158,8 @@ export type OperatorDashboardData = {
   revenue: {
     metrics: MetricCard[];
     conversionRows: SurfaceConversionRow[];
+    /** Signups / paywall / activations broken out by first-touch channel. */
+    channelRows: ChannelRow[];
   };
   retention: {
     metrics: MetricCard[];
@@ -145,6 +167,8 @@ export type OperatorDashboardData = {
   usage: {
     metrics: MetricCard[];
     usageRows: UsageRow[];
+    /** Leading-indicator moat metrics: decision log, accuracy report, briefing ratings. */
+    moatMetrics: MetricCard[];
   };
   cost: {
     metrics: MetricCard[];
@@ -552,7 +576,7 @@ export async function getOperatorDashboardData(
         await supabase
           .from("product_events")
           .select(
-            "occurred_at, user_id, event_name, tier, platform, feature, plan_type, upgrade_surface, request_id, final_model_selected, generation_path, fallback_triggered, request_cost_estimate_usd, request_cost_is_estimated, is_first_use, repeat_within_24h",
+            "occurred_at, user_id, event_name, tier, platform, feature, plan_type, upgrade_surface, request_id, final_model_selected, generation_path, fallback_triggered, request_cost_estimate_usd, request_cost_is_estimated, is_first_use, repeat_within_24h, attribution_channel, utm_source, utm_medium, utm_campaign",
           )
           .gte("occurred_at", windowStart)
           .lte("occurred_at", now.toISOString())
@@ -597,7 +621,9 @@ export async function getOperatorDashboardData(
   const briefingFeedbackRows = await fetchAllRows<BriefingFeedbackRow>(async (from, to) =>
     await supabase
       .from("briefing_feedback")
-      .select("briefing_id, usefulness_score, acted_on, note, created_at")
+      .select(
+        "briefing_id, rating_emoji, rating_theme_hit, rating_theme_miss, usefulness_score, acted_on, note, created_at",
+      )
       .gte("created_at", windowStart)
       .lte("created_at", now.toISOString())
       .order("created_at", { ascending: false })
@@ -702,6 +728,38 @@ export async function getOperatorDashboardData(
   const askPaidSubmitted = askSubmitted.filter(
     (event) => event.tier === "pro" || event.tier === "internal",
   );
+
+  // ── Moat engagement events ────────────────────────────────────────────────
+  // These events are already in the product_events taxonomy but were never
+  // surfaced here. They are the leading indicators of the longitudinal value
+  // that justifies the 7-day trial: users who log decisions, check their
+  // accuracy report, and rate briefings are the ones who experience the moat.
+  const decisionLoggedEvents = filteredProductEvents.filter(
+    (event) => event.event_name === "decision_logged",
+  );
+  const accuracyReportViewedEvents = filteredProductEvents.filter(
+    (event) => event.event_name === "accuracy_report_viewed",
+  );
+  const briefingRatingSubmittedEvents = filteredProductEvents.filter(
+    (event) => event.event_name === "briefing_rating_submitted",
+  );
+
+  const decisionLoggerUserIds = new Set(
+    decisionLoggedEvents
+      .map((e) => e.user_id)
+      .filter((id): id is string => id !== null),
+  );
+  const accuracyReportViewerUserIds = new Set(
+    accuracyReportViewedEvents
+      .map((e) => e.user_id)
+      .filter((id): id is string => id !== null),
+  );
+  const briefingRaterUserIds = new Set(
+    briefingRatingSubmittedEvents
+      .map((e) => e.user_id)
+      .filter((id): id is string => id !== null),
+  );
+
   const generatedEvents = filteredProductEvents.filter((event) =>
     [
       "today_generated",
@@ -813,6 +871,92 @@ export async function getOperatorDashboardData(
     }))
     .sort((left, right) => right.checkoutCompleted - left.checkoutCompleted);
 
+  // ── By-channel acquisition rollup ──────────────────────────────────────────
+  // Groups attribution_channel across the full acquisition funnel. Every event
+  // now carries attribution_channel (stamped at insert time from the first-touch
+  // cookie, falling back to user_attribution when the cookie is absent), so
+  // this is a pure in-memory reduce over filteredProductEvents.
+  //
+  // Signups count distinct users, not distinct events, so a user who fires
+  // multiple signup_completed events (shouldn't, but defensive) counts once.
+  // Paid activations use checkout_completed as the canonical purchase event,
+  // matching how the rest of the dashboard attributes revenue.
+  const channelSignupUserIds = new Map<string, Set<string>>();
+  const channelRowMap = filteredProductEvents.reduce((map, event) => {
+    if (
+      event.event_name !== "signup_completed" &&
+      event.event_name !== "paywall_shown" &&
+      event.event_name !== "checkout_started" &&
+      event.event_name !== "checkout_completed"
+    ) {
+      return map;
+    }
+
+    const channel = event.attribution_channel ?? "unknown";
+    const current = map.get(channel) ?? {
+      channel,
+      signups: 0,
+      paidActivations: 0,
+      paywallShown: 0,
+      checkoutStarted: 0,
+      checkoutCompleted: 0,
+    };
+
+    if (event.event_name === "signup_completed") {
+      if (event.user_id !== null) {
+        const set = channelSignupUserIds.get(channel) ?? new Set<string>();
+        set.add(event.user_id);
+        channelSignupUserIds.set(channel, set);
+      } else {
+        current.signups += 1;
+      }
+    }
+    if (event.event_name === "paywall_shown") current.paywallShown += 1;
+    if (event.event_name === "checkout_started") current.checkoutStarted += 1;
+    if (event.event_name === "checkout_completed") {
+      current.checkoutCompleted += 1;
+      current.paidActivations += 1;
+    }
+
+    map.set(channel, current);
+    return map;
+  }, new Map<string, Omit<ChannelRow, "paywallToPaidRate">>());
+
+  // Fold unique signup user_ids into the signups count.
+  for (const [channel, userSet] of channelSignupUserIds.entries()) {
+    const row = channelRowMap.get(channel);
+    if (row !== undefined) {
+      row.signups += userSet.size;
+      channelRowMap.set(channel, row);
+    } else {
+      channelRowMap.set(channel, {
+        channel,
+        signups: userSet.size,
+        paidActivations: 0,
+        paywallShown: 0,
+        checkoutStarted: 0,
+        checkoutCompleted: 0,
+      });
+    }
+  }
+
+  const channelRows: ChannelRow[] = Array.from(channelRowMap.values())
+    .map((row) => ({
+      ...row,
+      paywallToPaidRate: percentage(row.checkoutCompleted, row.paywallShown),
+    }))
+    .sort((left, right) => {
+      // Paid activations first, then signups, then alphabetical — keeps the
+      // operator's eye on the channels that matter for CAC payback.
+      if (right.paidActivations !== left.paidActivations) {
+        return right.paidActivations - left.paidActivations;
+      }
+      if (right.signups !== left.signups) {
+        return right.signups - left.signups;
+      }
+      return left.channel.localeCompare(right.channel);
+    });
+
   const usageRows: UsageRow[] = (["today", "forecast", "blueprint", "ask"] as const).map(
     (surface) => {
       const surfaceEvents = generatedEvents.filter((event) => deriveSurface(event) === surface);
@@ -866,17 +1010,40 @@ export async function getOperatorDashboardData(
     matchesTier(decisionTierById.get(row.decision_guidance_id) ?? "free", filters.tier),
   );
 
+  // Legacy 1-5 score — still computed for back-compat on rows submitted before
+  // 5.2 Phase A shipped. New rows will be null here and excluded by `average`.
   const todayUsefulness = average(
-    filteredBriefingFeedback.map((row) => row.usefulness_score),
+    filteredBriefingFeedback
+      .map((row) => row.usefulness_score)
+      .filter((value): value is number => value !== null),
   );
   const askUsefulness = average(
     filteredDecisionFeedback.map((row) => row.usefulness_score),
   );
-  const actedOnPositive =
-    filteredBriefingFeedback.filter((row) => row.acted_on !== "no").length +
-    filteredDecisionFeedback.filter((row) => row.acted_on !== "no").length;
-  const totalFeedbackCount =
-    filteredBriefingFeedback.length + filteredDecisionFeedback.length;
+
+  // 5.2 Phase A: emoji rating rows carry rating_emoji. Only these feed the
+  // new "Nailed it" / "Vague" / "Off" distribution — legacy 1-5 rows aren't
+  // comparable and stay in their own legacy metric.
+  const emojiRatedRows = filteredBriefingFeedback.filter(
+    (row) => row.rating_emoji !== null,
+  );
+  const nailedItCount = emojiRatedRows.filter(
+    (row) => row.rating_emoji === "nailed_it",
+  ).length;
+  const vagueCount = emojiRatedRows.filter(
+    (row) => row.rating_emoji === "vague",
+  ).length;
+  const offCount = emojiRatedRows.filter(
+    (row) => row.rating_emoji === "off",
+  ).length;
+
+  // Ask-side acted-on share stays pure — decision_guidance_feedback still uses
+  // the 1-5 + acted_on shape. Briefing feedback no longer contributes here
+  // (emoji rows have null acted_on, so filtering would double-count legacy
+  // rows only; cleaner to report Ask-only below).
+  const actedOnPositive = filteredDecisionFeedback.filter(
+    (row) => row.acted_on !== "no",
+  ).length;
 
   const checkoutDelta = priorProductEventsResult.ready
     ? formatDelta(checkoutCompleted.length, priorCheckoutCompleted.length)
@@ -957,6 +1124,7 @@ export async function getOperatorDashboardData(
         },
       ],
       conversionRows,
+      channelRows,
     },
     retention: {
       metrics: [
@@ -1016,6 +1184,57 @@ export async function getOperatorDashboardData(
         },
       ],
       usageRows,
+      moatMetrics: [
+        {
+          label: "Decision loggers",
+          value: decisionLoggerUserIds.size === 0 ? "—" : `${decisionLoggerUserIds.size}`,
+          detail:
+            decisionLoggerUserIds.size === 0
+              ? "No decision_logged events yet. Will populate as users log decisions."
+              : `${decisionLoggedEvents.length} decision${decisionLoggedEvents.length !== 1 ? "s" : ""} logged by ${decisionLoggerUserIds.size} unique user${decisionLoggerUserIds.size !== 1 ? "s" : ""} in this window. % of paid: ${percentage(
+                  Array.from(decisionLoggerUserIds).filter((id) => currentPaidUserIds.has(id)).length,
+                  currentPaidUsers.length,
+                )}.`,
+          status: decisionLoggerUserIds.size === 0 ? "placeholder" : "live",
+        } satisfies MetricCard,
+        {
+          label: "Decisions / logger",
+          value:
+            decisionLoggerUserIds.size === 0
+              ? "—"
+              : formatDecimal(decisionLoggedEvents.length / decisionLoggerUserIds.size, 1),
+          detail:
+            decisionLoggerUserIds.size === 0
+              ? "No decision_logged events yet."
+              : `Average decisions logged per user who logged ≥1 in this window.`,
+          status: decisionLoggerUserIds.size === 0 ? "placeholder" : "live",
+        } satisfies MetricCard,
+        {
+          label: "Accuracy report viewers",
+          value:
+            accuracyReportViewerUserIds.size === 0
+              ? "—"
+              : `${accuracyReportViewerUserIds.size}`,
+          detail:
+            accuracyReportViewerUserIds.size === 0
+              ? "No accuracy_report_viewed events yet. Will populate once users open their accuracy score."
+              : `${accuracyReportViewedEvents.length} view${accuracyReportViewedEvents.length !== 1 ? "s" : ""} by ${accuracyReportViewerUserIds.size} unique user${accuracyReportViewerUserIds.size !== 1 ? "s" : ""} in this window. % of paid: ${percentage(
+                  Array.from(accuracyReportViewerUserIds).filter((id) => currentPaidUserIds.has(id)).length,
+                  currentPaidUsers.length,
+                )}.`,
+          status: accuracyReportViewerUserIds.size === 0 ? "placeholder" : "live",
+        } satisfies MetricCard,
+        {
+          label: "Briefing raters",
+          value:
+            briefingRaterUserIds.size === 0 ? "—" : `${briefingRaterUserIds.size}`,
+          detail:
+            briefingRaterUserIds.size === 0
+              ? "No briefing_rating_submitted events yet. Will populate as users rate daily briefings."
+              : `${briefingRatingSubmittedEvents.length} rating${briefingRatingSubmittedEvents.length !== 1 ? "s" : ""} submitted by ${briefingRaterUserIds.size} unique user${briefingRaterUserIds.size !== 1 ? "s" : ""} in this window (${formatDecimal(briefingRatingSubmittedEvents.length / Math.max(briefingRaterUserIds.size, 1), 1)} ratings/rater).`,
+          status: briefingRaterUserIds.size === 0 ? "placeholder" : "live",
+        } satisfies MetricCard,
+      ],
     },
     cost: {
       metrics: [
@@ -1060,9 +1279,34 @@ export async function getOperatorDashboardData(
     quality: {
       metrics: [
         {
-          label: "Today usefulness",
+          label: "Today rating: Nailed it",
+          value: percentage(nailedItCount, emojiRatedRows.length),
+          detail:
+            emojiRatedRows.length > 0
+              ? `${nailedItCount}/${emojiRatedRows.length} Today ratings landed as 🎯 in this window.`
+              : "No Today ratings submitted yet in this window.",
+          status: emojiRatedRows.length > 0 ? "live" : "placeholder",
+        },
+        {
+          label: "Today rating mix",
+          value:
+            emojiRatedRows.length > 0
+              ? `🎯 ${nailedItCount} · 🌫️ ${vagueCount} · 🙃 ${offCount}`
+              : "—",
+          detail:
+            emojiRatedRows.length > 0
+              ? `Out of ${emojiRatedRows.length} Today ratings.`
+              : "Waiting on first rating submissions.",
+          status: emojiRatedRows.length > 0 ? "live" : "placeholder",
+        },
+        {
+          label: "Today legacy 1-5 (pre-5.2)",
           value: formatDecimal(todayUsefulness, 2),
-          detail: `${filteredBriefingFeedback.length} feedback responses on Today briefings.`,
+          detail:
+            filteredBriefingFeedback.filter((row) => row.usefulness_score !== null)
+              .length > 0
+              ? `${filteredBriefingFeedback.filter((row) => row.usefulness_score !== null).length} legacy 1-5 responses (pre-emoji rating launch).`
+              : "No legacy 1-5 responses remain in this window.",
           status: "live",
         },
         {
@@ -1072,10 +1316,13 @@ export async function getOperatorDashboardData(
           status: "live",
         },
         {
-          label: "Acted-on share",
-          value: percentage(actedOnPositive, totalFeedbackCount),
-          detail: "yes + partial feedback across Today and Ask.",
-          status: "live",
+          label: "Ask acted-on share",
+          value: percentage(actedOnPositive, filteredDecisionFeedback.length),
+          detail:
+            filteredDecisionFeedback.length > 0
+              ? "yes + partial feedback on Ask guidance."
+              : "No Ask feedback in this window.",
+          status: filteredDecisionFeedback.length > 0 ? "live" : "placeholder",
         },
         {
           label: "Complaint rate",

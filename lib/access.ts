@@ -11,6 +11,7 @@ export type FeatureAccess = {
 
 export type DailyUsageLimits = {
   askQuestionsPerDay: number | null;
+  askBigDecisionPerWeek: number | null;
   todayRefreshesPerDay: number | null;
 };
 
@@ -106,7 +107,8 @@ export function getFeatureAccess(accessLevel: AccessLevel): FeatureAccess {
 export function getDailyUsageLimits(accessLevel: AccessLevel): DailyUsageLimits {
   if (accessLevel === "free") {
     return {
-      askQuestionsPerDay: 2,
+      askQuestionsPerDay: 3,
+      askBigDecisionPerWeek: 1,
       // DEBUG: temporarily disable the free-tier Today refresh cap while tuning
       // upstream free vs paid content packs. Reintroduce the numeric limit here
       // when the gating experiment is complete.
@@ -116,6 +118,7 @@ export function getDailyUsageLimits(accessLevel: AccessLevel): DailyUsageLimits 
 
   return {
     askQuestionsPerDay: null,
+    askBigDecisionPerWeek: null,
     todayRefreshesPerDay: null,
   };
 }

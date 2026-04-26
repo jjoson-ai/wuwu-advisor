@@ -7,6 +7,7 @@ import {
   appendQueryParam,
   getAppOrigin,
   getStripeServerClient,
+  resolveCheckoutSessionConversionValue,
   sanitizeReturnPath,
 } from "@/lib/stripe";
 
@@ -120,6 +121,11 @@ export async function GET(request: Request) {
     });
 
     if (grantResult.activatedNow) {
+      const conversionValue = await resolveCheckoutSessionConversionValue(
+        stripe,
+        session,
+      );
+
       await logProductEvent({
         event_name: "pro_activated",
         timestamp: new Date().toISOString(),
@@ -138,6 +144,8 @@ export async function GET(request: Request) {
         request_cost_is_estimated: null,
         is_first_use: null,
         repeat_within_24h: null,
+        paid_media_value_usd: conversionValue?.value_usd ?? null,
+        paid_media_currency: conversionValue?.currency ?? null,
       });
     }
 

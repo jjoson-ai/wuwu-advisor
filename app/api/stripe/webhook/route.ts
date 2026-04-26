@@ -7,7 +7,11 @@ import {
   revokeProAccessToUser,
 } from "@/lib/billing";
 import { logProductEvent } from "@/lib/product-events.server";
-import { getStripeServerClient, getStripeWebhookSecret } from "@/lib/stripe";
+import {
+  getStripeServerClient,
+  getStripeWebhookSecret,
+  resolveCheckoutSessionConversionValue,
+} from "@/lib/stripe";
 
 export async function POST(request: Request) {
   const signature = request.headers.get("stripe-signature");
@@ -73,6 +77,12 @@ export async function POST(request: Request) {
         });
 
         if (grantResult.activatedNow) {
+          const stripeForValue = getStripeServerClient();
+          const conversionValue = await resolveCheckoutSessionConversionValue(
+            stripeForValue,
+            session,
+          );
+
           await logProductEvent({
             event_name: "pro_activated",
             timestamp: new Date().toISOString(),
@@ -91,6 +101,8 @@ export async function POST(request: Request) {
             request_cost_is_estimated: null,
             is_first_use: null,
             repeat_within_24h: null,
+            paid_media_value_usd: conversionValue?.value_usd ?? null,
+            paid_media_currency: conversionValue?.currency ?? null,
           });
         }
         break;

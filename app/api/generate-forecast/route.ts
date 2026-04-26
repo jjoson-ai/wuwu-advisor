@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import { buildCalibrationPromptFragment } from "@/domain/accuracy/calibration.service";
 import { buildAstrologyContext } from "@/domain/astrology/context";
 import {
   DailyBriefingInputSchema,
@@ -176,10 +177,29 @@ export async function POST(request: Request) {
       try {
         send({ type: "stage", label: "Reading the month ahead" });
 
-        const [blueprintRow, latestForecastRow] = await Promise.all([
-          getBlueprintForUser(user.id, accessToken),
-          getForecastForUser(user.id, accessToken),
-        ]);
+        const [blueprintRow, latestForecastRow, calibrationResult] =
+          await Promise.all([
+            getBlueprintForUser(user.id, accessToken),
+            getForecastForUser(user.id, accessToken),
+            // Per-user calibration fragment. See briefing route for the
+            // same pattern + failure mode (must never block generation).
+            buildCalibrationPromptFragment(user.id, accessToken).catch(
+              (error) => {
+                console.error(
+                  "[calibration_fragment_failed]",
+                  error instanceof Error ? error.message : error,
+                );
+                return {
+                  fragment: null,
+                  reason: "disabled" as const,
+                  totalRatings: 0,
+                  nailedItRate: null,
+                };
+              },
+            ),
+          ]);
+        const calibrationFragment = calibrationResult.fragment;
+        const calibrationApplied = calibrationResult.reason === "applied";
         const formattedBlueprint = blueprintRow === null ? null : formatBlueprintForPage(blueprintRow);
         const generationContext = buildForecastGenerationContext({
           featureAccess: accessState.featureAccess,
@@ -199,6 +219,7 @@ export async function POST(request: Request) {
           chineseAstrologySignal: generationContext.chineseAstrologySignal,
           horizon: generationContext.horizon,
           blueprintContext: generationContext.blueprintContext,
+          calibrationFragment,
         };
 
         let forecast: Forecast;
@@ -467,6 +488,8 @@ export async function POST(request: Request) {
             requestCostEstimateUsd == null ? null : requestCostIsEstimated,
           is_first_use: latestForecastRow === null,
           repeat_within_24h: null,
+          calibration_applied: calibrationApplied,
+          calibration_rating_count: calibrationResult.totalRatings,
         });
 
         if (latestForecastRow === null) {

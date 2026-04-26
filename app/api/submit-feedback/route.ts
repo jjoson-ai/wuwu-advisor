@@ -3,35 +3,49 @@ import { NextResponse } from "next/server";
 import { getLatestBriefingForUser } from "@/domain/briefing/briefing.service";
 import { upsertBriefingFeedback } from "@/domain/feedback/feedback.service";
 import {
-  ACTED_ON_OPTIONS,
-  type ActedOnValue,
+  RATING_EMOJI_OPTIONS,
+  RATING_THEME_OPTIONS,
+  type RatingEmojiValue,
+  type RatingThemeValue,
 } from "@/domain/feedback/feedback.types";
 import { getRequestAuth } from "@/lib/auth";
+import { getRequestAccessState } from "@/lib/debug-access";
+import { getRequestPlatform } from "@/lib/product-events";
+import { logProductEvent } from "@/lib/product-events.server";
 
-function parseUsefulnessScore(value: unknown) {
-  const numeric =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : NaN;
-
-  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 5) {
-    return numeric;
+function parseRatingEmoji(value: unknown): RatingEmojiValue | null {
+  if (
+    typeof value === "string" &&
+    RATING_EMOJI_OPTIONS.includes(value as RatingEmojiValue)
+  ) {
+    return value as RatingEmojiValue;
   }
 
   return null;
 }
 
-function parseActedOn(value: unknown) {
-  if (
-    typeof value === "string" &&
-    ACTED_ON_OPTIONS.includes(value as ActedOnValue)
-  ) {
-    return value as ActedOnValue;
+/**
+ * Accept a raw list from the client, strip duplicates, drop anything that
+ * isn't a known theme. Cap at six so a malicious client can't bloat a row.
+ */
+function parseRatingThemes(value: unknown): RatingThemeValue[] | null {
+  if (value == null) return [];
+  if (!Array.isArray(value)) return null;
+
+  const seen = new Set<RatingThemeValue>();
+
+  for (const candidate of value) {
+    if (
+      typeof candidate === "string" &&
+      RATING_THEME_OPTIONS.includes(candidate as RatingThemeValue)
+    ) {
+      seen.add(candidate as RatingThemeValue);
+    }
   }
 
-  return null;
+  if (seen.size > RATING_THEME_OPTIONS.length) return null;
+
+  return Array.from(seen);
 }
 
 export async function POST(request: Request) {
@@ -44,8 +58,9 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as {
       briefingId?: unknown;
-      usefulnessScore?: unknown;
-      actedOn?: unknown;
+      ratingEmoji?: unknown;
+      ratingThemeHit?: unknown;
+      ratingThemeMiss?: unknown;
       note?: unknown;
     };
 
@@ -56,18 +71,26 @@ export async function POST(request: Request) {
       );
     }
 
-    const usefulnessScore = parseUsefulnessScore(body.usefulnessScore);
-    if (usefulnessScore === null) {
+    const ratingEmoji = parseRatingEmoji(body.ratingEmoji);
+    if (ratingEmoji === null) {
       return NextResponse.json(
-        { error: "usefulnessScore must be an integer between 1 and 5." },
+        { error: "ratingEmoji must be one of nailed_it, vague, or off." },
         { status: 400 },
       );
     }
 
-    const actedOn = parseActedOn(body.actedOn);
-    if (actedOn === null) {
+    const ratingThemeHit = parseRatingThemes(body.ratingThemeHit);
+    if (ratingThemeHit === null) {
       return NextResponse.json(
-        { error: "actedOn must be one of yes, partial, or no." },
+        { error: "ratingThemeHit must be an array of valid theme names." },
+        { status: 400 },
+      );
+    }
+
+    const ratingThemeMiss = parseRatingThemes(body.ratingThemeMiss);
+    if (ratingThemeMiss === null) {
+      return NextResponse.json(
+        { error: "ratingThemeMiss must be an array of valid theme names." },
         { status: 400 },
       );
     }
@@ -90,8 +113,9 @@ export async function POST(request: Request) {
       {
         briefingId: body.briefingId,
         userId: user.id,
-        usefulnessScore,
-        actedOn,
+        ratingEmoji,
+        ratingThemeHit,
+        ratingThemeMiss,
         note,
       },
       accessToken,
@@ -99,6 +123,33 @@ export async function POST(request: Request) {
 
     if (saveResult.success === false) {
       return NextResponse.json({ error: saveResult.message }, { status: 500 });
+    }
+
+    // Fire-and-forget funnel event so we can see rating volume + opt-in rate
+    // in /ops without scanning briefing_feedback directly. Rating distribution
+    // + per-theme counts stay in briefing_feedback (queryable for Phase B).
+    try {
+      const accessState = getRequestAccessState(user, request);
+      await logProductEvent({
+        event_name: "briefing_rating_submitted",
+        timestamp: new Date().toISOString(),
+        user_id: user.id,
+        tier: accessState.accessLevel,
+        platform: getRequestPlatform(request),
+        feature: "today",
+        plan_type: accessState.accessLevel === "free" ? "free" : "pro",
+        upgrade_surface: null,
+        request_id: null,
+        final_model_selected: null,
+        generation_path: null,
+        fallback_triggered: null,
+        request_cost_estimate_usd: null,
+        request_cost_is_estimated: null,
+        is_first_use: null,
+        repeat_within_24h: null,
+      });
+    } catch (eventError) {
+      console.error("[briefing_rating_event_failed]", eventError);
     }
 
     return NextResponse.json({

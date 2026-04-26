@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import { buildCalibrationPromptFragment } from "@/domain/accuracy/calibration.service";
 import { buildAstrologyContext } from "@/domain/astrology/context";
 import { buildWesternModalitySignal } from "@/domain/astrology/western.modality";
 import {
@@ -341,10 +342,34 @@ export async function POST(request: Request) {
                 limitations: [],
               };
 
-        const [blueprintRow, recentBriefingCount] = await Promise.all([
-          getBlueprintForUser(user.id, accessToken),
-          countDailyBriefingsForUser(user.id, accessToken),
-        ]);
+        const [blueprintRow, recentBriefingCount, calibrationResult] =
+          await Promise.all([
+            getBlueprintForUser(user.id, accessToken),
+            countDailyBriefingsForUser(user.id, accessToken),
+            // Pulls last 30 days of emoji ratings and returns a prompt fragment.
+            // Returns `{fragment: null}` silently when the env flag is off or
+            // the user has < 10 ratings in the window. See
+            // domain/accuracy/calibration.service.ts for gate logic.
+            buildCalibrationPromptFragment(user.id, accessToken).catch(
+              (error) => {
+                // Calibration must never block briefing generation. If the
+                // rollup query fails (e.g. migration not applied yet), log
+                // and proceed uncalibrated.
+                console.error(
+                  "[calibration_fragment_failed]",
+                  error instanceof Error ? error.message : error,
+                );
+                return {
+                  fragment: null,
+                  reason: "disabled" as const,
+                  totalRatings: 0,
+                  nailedItRate: null,
+                };
+              },
+            ),
+          ]);
+        const calibrationFragment = calibrationResult.fragment;
+        const calibrationApplied = calibrationResult.reason === "applied";
         const formattedBlueprint = blueprintRow === null ? null : formatBlueprintForPage(blueprintRow);
         const { freeAstroDailyContext: generationFreeAstroDailyContext, blueprintContext } =
           buildTodayGenerationContext({
@@ -418,6 +443,7 @@ export async function POST(request: Request) {
                 freeAstroDailyContext: generationFreeAstroDailyContext,
                 blueprintContext,
                 signals,
+                calibrationFragment,
               })
             : await generateTodayNarrativeCheap({
                 briefingInput,
@@ -427,6 +453,7 @@ export async function POST(request: Request) {
                 freeAstroDailyContext: generationFreeAstroDailyContext,
                 blueprintContext,
                 signals,
+                calibrationFragment,
               });
           logLlmCost({
             meta: { ...narrativeResult, duration_ms: Date.now() - narrativeStart },
@@ -564,6 +591,7 @@ export async function POST(request: Request) {
             westernModalitySignal,
             westernOutput,
             timingOutput,
+            calibrationFragment,
           });
           const synthesisResult = await generateJsonObjectWithMeta({
             provider: frontierModel.provider,
@@ -742,6 +770,8 @@ export async function POST(request: Request) {
             requestCostEstimateUsd == null ? null : requestCostIsEstimated,
           is_first_use: recentBriefingCount === 0,
           repeat_within_24h: null,
+          calibration_applied: calibrationApplied,
+          calibration_rating_count: calibrationResult.totalRatings,
         });
 
         if (recentBriefingCount === 0) {

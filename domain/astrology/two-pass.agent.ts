@@ -53,6 +53,14 @@ type TodaySignalsInput = {
 
 type TodayNarrativeInput = TodaySignalsInput & {
   signals: TodaySignals;
+  /**
+   * Optional per-user calibration fragment from
+   * `domain/accuracy/calibration.service.ts`. When non-null, gets spliced into
+   * the narrative system prompt so the final briefing tunes to the themes
+   * this user has rated as hitting or missing. See that module for the gate
+   * logic. Applies to both cheap (compose) and frontier (synthesize) passes.
+   */
+  calibrationFragment?: string | null;
 };
 
 function buildTodaySignalsSystemPrompt(input: DailyBriefingInput) {
@@ -109,6 +117,7 @@ export function buildTodaySignalsRequest(input: TodaySignalsInput) {
 function buildTodayNarrativeSystemPrompt(
   input: DailyBriefingInput,
   pass: GenerationPass,
+  calibrationFragment: string | null = null,
 ) {
   return [
     "Return exactly one JSON object and nothing else.",
@@ -131,6 +140,7 @@ function buildTodayNarrativeSystemPrompt(
       : "Use more nuance where the signals support it, but keep the output tight.",
     "Keep the tone grounded, precise, and useful.",
     `Tone preference: ${input.tone_preference}.`,
+    ...(calibrationFragment === null ? [] : [calibrationFragment]),
   ].join("\n\n");
 }
 
@@ -172,7 +182,11 @@ export function buildTodayNarrativeRequest(
   pass: GenerationPass,
 ) {
   return {
-    systemPrompt: buildTodayNarrativeSystemPrompt(input.briefingInput, pass),
+    systemPrompt: buildTodayNarrativeSystemPrompt(
+      input.briefingInput,
+      pass,
+      input.calibrationFragment ?? null,
+    ),
     userPrompt: buildTodayNarrativeUserPrompt(input),
     cachedSystemBlock: buildTodayCachedContextBlock(input),
     schemaName: "today_narrative",

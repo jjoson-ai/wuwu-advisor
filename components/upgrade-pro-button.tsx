@@ -9,6 +9,7 @@ import { startProCheckout } from "@/lib/pro-checkout";
 type UpgradeProButtonProps = {
   label?: string;
   upgradeSurface: string;
+  plan?: "monthly" | "annual";
   feature?: ProductFeature;
   className?: string;
   style?: React.CSSProperties;
@@ -17,8 +18,9 @@ type UpgradeProButtonProps = {
 };
 
 export function UpgradeProButton({
-  label = "Unlock Pro",
+  label = "Start 7-day free trial",
   upgradeSurface,
+  plan = "annual",
   feature,
   className = "button secondary",
   style,
@@ -39,7 +41,7 @@ export function UpgradeProButton({
         upgrade_surface: upgradeSurface,
       });
 
-      await startProCheckout({ upgradeSurface });
+      await startProCheckout({ upgradeSurface, plan });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to start checkout.";

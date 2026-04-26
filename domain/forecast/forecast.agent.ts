@@ -17,6 +17,7 @@ import {
   type ForecastHorizon,
 } from "@/domain/forecast/forecast.types";
 import type { NumerologyContext } from "@/domain/numerology/context";
+import { CULT_PHRASE_RULES, FINANCIAL_SAFETY_RULES } from "@/domain/safety/prompt-rules";
 import { assertNoForbiddenInternalTermsInUserOutput } from "@/lib/output-safety";
 
 type ForecastAgentInput = {
@@ -26,6 +27,14 @@ type ForecastAgentInput = {
   chineseAstrologyContext: ChineseAstrologyContext | null;
   chineseAstrologySignal: ChineseAstrologySignal | null;
   horizon: ForecastHorizon;
+  /**
+   * Optional per-user calibration fragment from
+   * `domain/accuracy/calibration.service.ts`. When non-null, spliced into the
+   * forecast system prompt so medium-horizon guidance tunes to themes this
+   * user has rated as hitting or missing over the last 30 days. See that
+   * module for the gate logic.
+   */
+  calibrationFragment?: string | null;
 };
 
 export type ForecastOutputDepth = "free" | "full";
@@ -33,6 +42,7 @@ export type ForecastOutputDepth = "free" | "full";
 function buildForecastSystemPrompt(
   input: DailyBriefingInput,
   outputDepth: ForecastOutputDepth,
+  calibrationFragment: string | null = null,
 ) {
   return [
     "Return exactly one JSON object and nothing else.",
@@ -44,6 +54,8 @@ function buildForecastSystemPrompt(
     "Keep the tone grounded, human, useful, and concise.",
     "Avoid corporate language, doom language, and excessive mystical phrasing.",
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
+    ...FINANCIAL_SAFETY_RULES,
+    ...CULT_PHRASE_RULES,
     "Reject generic phrasing such as 'today is a good day' or 'you may feel'.",
     "Do not use weekday-specific phrasing or intraday timing language.",
     "Instead describe the active phase, what is accumulating, what is gaining momentum, what should be built steadily, and what should not be forced.",
@@ -59,6 +71,7 @@ function buildForecastSystemPrompt(
     "best_use_of_this_period should describe where patient accumulation is likely to pay off over the next month.",
     "what_to_avoid should name patterns of overreach, mis-timing, unnecessary friction, or work that should be delayed during this period.",
     "Every value must be a plain JSON string except the fixed object structure.",
+    ...(calibrationFragment === null ? [] : [calibrationFragment]),
   ].join("\n\n");
 }
 
@@ -102,7 +115,11 @@ export function buildForecastAgentRequest(
     outputDepth === "free" ? FreeForecastSchema : ForecastSchema;
 
   return {
-    systemPrompt: buildForecastSystemPrompt(input.briefingInput, outputDepth),
+    systemPrompt: buildForecastSystemPrompt(
+      input.briefingInput,
+      outputDepth,
+      input.calibrationFragment ?? null,
+    ),
     userPrompt: buildForecastUserPrompt(input),
     outputSchema,
     schemaName: "Forecast",

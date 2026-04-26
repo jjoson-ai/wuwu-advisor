@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getRequestAuth } from "@/lib/auth";
-import { getStripeProPriceId } from "@/lib/billing";
+import {
+  ANNUAL_TRIAL_DAYS,
+  getStripePriceIdForPlan,
+  type PlanType,
+} from "@/lib/billing";
 import { getRequestAccessState } from "@/lib/debug-access";
 import {
   getRequestPlatform,
@@ -17,6 +21,7 @@ import {
 const CheckoutRequestSchema = z.object({
   returnPath: z.string().trim().max(500).optional(),
   upgradeSurface: z.string().trim().min(1).max(80).optional(),
+  plan: z.enum(["monthly", "annual"]).optional().default("annual"),
 });
 
 export async function POST(request: Request) {
@@ -45,6 +50,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const input = CheckoutRequestSchema.parse(body);
+    const plan: PlanType = input.plan;
     const stripe = getStripeServerClient();
     const returnPath = sanitizeReturnPath(input.returnPath);
     const appOrigin = getAppOrigin(request);
@@ -52,7 +58,7 @@ export async function POST(request: Request) {
       mode: "subscription",
       line_items: [
         {
-          price: getStripeProPriceId(),
+          price: getStripePriceIdForPlan(plan),
           quantity: 1,
         },
       ],
@@ -63,18 +69,30 @@ export async function POST(request: Request) {
       customer_email: user.email,
       client_reference_id: user.id,
       allow_promotion_codes: true,
+      consent_collection: {
+        terms_of_service: "required",
+      },
+      custom_text: {
+        after_submit: {
+          message:
+            "By starting your trial you confirm you are 18 or older and agree to be charged after the 7-day free trial unless you cancel.",
+        },
+      },
       metadata: {
         user_id: user.id,
         upgrade_surface: input.upgradeSurface ?? "unknown",
         plan_type: "pro",
+        billing_plan: plan,
         platform: getRequestPlatform(request),
         return_path: returnPath,
       },
       subscription_data: {
+        trial_period_days: plan === "annual" ? ANNUAL_TRIAL_DAYS : undefined,
         metadata: {
           user_id: user.id,
           upgrade_surface: input.upgradeSurface ?? "unknown",
           plan_type: "pro",
+          billing_plan: plan,
           platform: getRequestPlatform(request),
         },
       },
@@ -91,6 +109,8 @@ export async function POST(request: Request) {
       metadataUserId: session.metadata?.user_id ?? null,
       returnPath,
       upgradeSurface: input.upgradeSurface ?? "unknown",
+      billingPlan: plan,
+      trialDays: plan === "annual" ? ANNUAL_TRIAL_DAYS : 0,
     });
 
     await logProductEvent({

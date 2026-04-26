@@ -4,9 +4,15 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import type { DecisionSafetyResponse } from "@/domain/decision/decision.safety";
+import type { CareModePayload } from "@/domain/safety/care-mode";
+import type { OutputSafetyBlockPayload } from "@/domain/safety/output-safety";
 import type { AskTurnRow } from "@/domain/decision/decision.types";
 import { PRODUCT_PLATFORM_HEADER } from "@/lib/product-events";
+
+const GENERATION_TIMEOUT_MS = 90_000;
 import { readGenerationStream } from "@/lib/client-generation-stream";
+import { CareModeCard } from "@/components/care-mode-card";
+import { SafetyBlockCard } from "@/components/safety-block-card";
 import { GenerationLoadingState } from "@/components/generation-loading-state";
 import { UpgradeProButton } from "@/components/upgrade-pro-button";
 
@@ -34,6 +40,9 @@ export function AskFollowUpForm({
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [safety, setSafety] = useState<DecisionSafetyResponse | null>(null);
+  const [careMode, setCareMode] = useState<CareModePayload | null>(null);
+  const [safetyBlock, setSafetyBlock] =
+    useState<OutputSafetyBlockPayload | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(initialSuggestions);
 
@@ -56,9 +65,14 @@ export function AskFollowUpForm({
     setIsSubmitting(true);
     setError(null);
     setSafety(null);
+    setCareMode(null);
+    setSafetyBlock(null);
     setShowUpgrade(false);
     setStreamingText("");
     setCurrentStage(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS);
 
     try {
       const response = await fetch("/api/ask-follow-up", {
@@ -68,18 +82,44 @@ export function AskFollowUpForm({
           [PRODUCT_PLATFORM_HEADER]: "web",
         },
         body: JSON.stringify({ conversationId, message }),
+        signal: controller.signal,
       });
 
       if (response.headers.get("content-type")?.startsWith("text/event-stream")) {
+        let streamCompleted = false;
+
         for await (const event of readGenerationStream(response)) {
           if (event.type === "stage") {
             setCurrentStage(event.label);
           } else if (event.type === "chunk") {
             setStreamingText((prev) => (prev ?? "") + event.text);
           } else if (event.type === "done") {
+            streamCompleted = true;
             const payload = event.payload as {
               suggestedFollowups?: string[];
+              care_mode?: CareModePayload;
+              safety_block?: OutputSafetyBlockPayload;
             } | null;
+
+            if (payload?.care_mode !== undefined) {
+              // Crisis detected in output. Discard any streamed chunks and
+              // show Care Mode instead.
+              setCareMode(payload.care_mode);
+              setMessage("");
+              setStreamingText(null);
+              return;
+            }
+
+            if (payload?.safety_block !== undefined) {
+              // Output safety classifier flagged. Discard any streamed
+              // chunks (the partial response was unsafe) and show the
+              // safety block card instead. Turn is NOT saved server-side.
+              setSafetyBlock(payload.safety_block);
+              setMessage("");
+              setStreamingText(null);
+              return;
+            }
+
             setSuggestions(payload?.suggestedFollowups ?? []);
             setMessage("");
             setStreamingText(null);
@@ -89,10 +129,15 @@ export function AskFollowUpForm({
             throw new Error(event.message);
           }
         }
+
+        if (!streamCompleted) {
+          throw new Error("Response was interrupted. Please try again.");
+        }
       } else {
         const payload = (await response.json()) as {
           error?: string;
           safety?: DecisionSafetyResponse;
+          care_mode?: CareModePayload;
           upgrade_required?: boolean;
           at_limit?: boolean;
         };
@@ -111,14 +156,24 @@ export function AskFollowUpForm({
           throw new Error(payload.error || "Unable to get follow-up.");
         }
 
+        if (payload.care_mode !== undefined) {
+          setCareMode(payload.care_mode);
+          return;
+        }
+
         if (payload.safety !== undefined) {
           setSafety(payload.safety);
           return;
         }
       }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to get follow-up.");
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        setError("This is taking longer than usual. Please try again.");
+      } else {
+        setError(err instanceof Error ? err.message : "Unable to get follow-up.");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsSubmitting(false);
       setCurrentStage(null);
       if (!isSubmitting) setStreamingText(null);
@@ -188,7 +243,7 @@ export function AskFollowUpForm({
           <UpgradeProButton
             className="button"
             feature="ask"
-            label="Upgrade to Pro"
+            label="Start 7-day free trial"
             upgradeSurface="ask_followup_limit"
           />
         </div>
@@ -242,12 +297,26 @@ export function AskFollowUpForm({
             <UpgradeProButton
               className="button"
               feature="ask"
-              label="Upgrade to Pro"
+              label="Start 7-day free trial"
               upgradeSurface="ask_followup_limit"
             />
           ) : null}
         </form>
       )}
+
+      {careMode !== null ? (
+        <CareModeCard feature="ask" payload={careMode} />
+      ) : null}
+
+      {safetyBlock !== null ? (
+        <SafetyBlockCard
+          feature="ask"
+          payload={safetyBlock}
+          onRetry={() => {
+            setSafetyBlock(null);
+          }}
+        />
+      ) : null}
 
       {safety !== null ? (
         <div className="card card-state card-state--stale stack">

@@ -7,10 +7,13 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "bakeoff:run": "tsx scripts/bakeoff/run.ts",
-    "bakeoff:report": "tsx scripts/bakeoff/report.ts",
+    "bakeoff:run": "tsx --env-file-if-exists=.env.local scripts/bakeoff/run.ts",
+    "bakeoff:report": "tsx --env-file-if-exists=.env.local scripts/bakeoff/report.ts",
     "test:smoke:auth": "playwright test tests/playwright/auth.setup.ts --project=setup --headed",
     "test:smoke:checkout": "playwright test tests/playwright/checkout.smoke.spec.ts --project=chromium-smoke --headed",
+    "test:smoke:prod:auth": "playwright test tests/playwright/auth.setup.ts --config=playwright.prod.config.ts --project=setup --headed",
+    "test:smoke:prod": "playwright test tests/playwright/prod.smoke.spec.ts --config=playwright.prod.config.ts --project=chromium-smoke --headed",
+    "verify:alpha": "tsx --env-file-if-exists=.env.local scripts/verify-alpha-readiness.ts",
     "test:ux:capture": "WUWU_AUDIT_RUN_ID=${WUWU_AUDIT_RUN_ID:-$(date +%Y%m%d-%H%M%S)} playwright test tests/playwright/ux-audit.capture.spec.ts --project=chromium-audit --project=iphone-audit --headed"
   },
   "dependencies": {

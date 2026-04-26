@@ -7,6 +7,9 @@ import { readGenerationStream } from "@/lib/client-generation-stream";
 import { GenerationLoadingState } from "@/components/generation-loading-state";
 import { PRODUCT_PLATFORM_HEADER } from "@/lib/product-events";
 
+// Blueprint generation is the heaviest pipeline — allow more time before aborting.
+const GENERATION_TIMEOUT_MS = 120_000;
+
 type GenerateBlueprintButtonProps = {
   label?: string;
 };
@@ -24,24 +27,35 @@ export function GenerateBlueprintButton({
     setError(null);
     setCurrentStage(null);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS);
+
     try {
       const response = await fetch("/api/generate-blueprint", {
         method: "POST",
         headers: {
           [PRODUCT_PLATFORM_HEADER]: "web",
         },
+        signal: controller.signal,
       });
 
       if (response.headers.get("content-type")?.startsWith("text/event-stream")) {
+        let streamCompleted = false;
+
         for await (const event of readGenerationStream(response)) {
           if (event.type === "stage") {
             setCurrentStage(event.label);
           } else if (event.type === "done") {
+            streamCompleted = true;
             router.refresh();
             return;
           } else if (event.type === "error") {
             throw new Error(event.message);
           }
+        }
+
+        if (!streamCompleted) {
+          throw new Error("Generation was interrupted. Please try again.");
         }
       } else {
         const payload = (await response.json()) as { error?: string };
@@ -52,11 +66,16 @@ export function GenerateBlueprintButton({
 
         router.refresh();
       }
-    } catch (error) {
-      setError(
-        error instanceof Error ? error.message : "Unable to generate blueprint.",
-      );
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        setError("This is taking longer than usual. Please try again.");
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Unable to generate blueprint.",
+        );
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsSubmitting(false);
       setCurrentStage(null);
     }
@@ -85,11 +104,21 @@ export function GenerateBlueprintButton({
           />
         ) : null}
       </div>
-      {error === null ? null : (
-        <p className="muted" style={{ margin: 0 }}>
-          {error}
-        </p>
-      )}
+      {error !== null ? (
+        <div className="stack" style={{ gap: "0.4rem" }}>
+          <p className="muted" style={{ margin: 0 }}>
+            {error}
+          </p>
+          <button
+            className="button secondary"
+            onClick={handleClick}
+            style={{ alignSelf: "flex-start" }}
+            type="button"
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

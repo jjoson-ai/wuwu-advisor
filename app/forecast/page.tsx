@@ -301,7 +301,7 @@ export default async function ForecastPage() {
             <LockedFeatureCard
               data-testid="forecast-upgrade-paywall"
               featured
-              ctaLabel="Upgrade to Pro"
+              ctaLabel="Start 7-day free trial"
               description="Pro unlocks the deeper planning sections — so each month's guidance gets measurably more specific to where your effort belongs."
               statusLabel="Included in Pro"
               title="Unlock your full Forecast"

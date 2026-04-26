@@ -6,6 +6,7 @@ import type {
 } from "@/domain/astrology/schemas";
 import type { ModalitySignal } from "@/domain/modality/modality.types";
 import type { NumerologyContext } from "@/domain/numerology/context";
+import { CULT_PHRASE_RULES, FINANCIAL_SAFETY_RULES } from "@/domain/safety/prompt-rules";
 import type { FreeAstroDailyContext } from "@/lib/freeastroapi";
 
 function getBirthTimeSpecificityRule(input: DailyBriefingInput) {
@@ -23,6 +24,8 @@ function buildSharedSystemRules(input: DailyBriefingInput) {
     "Do not use mystical filler, fate language, or theatrical phrasing.",
     "Do not use doom-heavy language.",
     "Do not give medical, legal, or financial guarantees.",
+    ...FINANCIAL_SAFETY_RULES,
+    ...CULT_PHRASE_RULES,
     "Keep guidance concise, specific, and easy to act on in real life.",
     "Prefer tradeoffs and contrasts over vague encouragement.",
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
@@ -88,6 +91,8 @@ export function westernSystemPrompt(input: DailyBriefingInput) {
     "Use short, practical, action-oriented strings with emotional or situational texture.",
     "No mystical filler. No doom-heavy language. No guarantees.",
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
+    ...FINANCIAL_SAFETY_RULES,
+    ...CULT_PHRASE_RULES,
     getBirthTimeSpecificityRule(input),
     `Tone preference: ${input.tone_preference}.`,
     `Date context: ${input.date} (${input.weekday}) in ${input.timezone}.`,
@@ -134,7 +139,10 @@ export function timingSystemPrompt(input: DailyBriefingInput) {
   ].join("\n\n");
 }
 
-export function synthesisSystemPrompt(input: DailyBriefingInput) {
+export function synthesisSystemPrompt(
+  input: DailyBriefingInput,
+  calibrationFragment: string | null = null,
+) {
   return [
     buildSharedSystemRules(input),
     "Task: Merge the western and timing outputs into one final daily briefing.",
@@ -171,6 +179,7 @@ export function synthesisSystemPrompt(input: DailyBriefingInput) {
     "Lower confidence when the upstream signals are broad, repetitive, or low-specificity. Broad guidance should usually be medium, not high.",
     "The final date must match the provided input date exactly.",
     "If either upstream source has reduced confidence because birth time is not exact, keep the final confidence conservative.",
+    ...(calibrationFragment === null ? [] : [calibrationFragment]),
     'Output shape: {"date":"YYYY-MM-DD","confidence":"low|medium|high","executive_summary":"string","decision_of_day":{"scenario":"string","do":"string","avoid":"string","why":"string"},"cards":{"career":{"headline":"string","best_move":"string","watch_out":"string"},"money":{"headline":"string","lean_toward":"string","avoid":"string","risk_level":"low|medium|high"},"relationships":{"headline":"string","best_action":"string","avoid":"string"},"health":{"headline":"string","best_use":"string","avoid":"string"},"personal_growth":{"headline":"string","focus":"string","good_for":"string","not_ideal_for":"string"}},"timing":{"best_window":"string","avoid_window":"string"},"micro_claim":{"statement":"string","horizon":"24h","track_prompt":"string"}}',
   ].join("\n\n");
 }

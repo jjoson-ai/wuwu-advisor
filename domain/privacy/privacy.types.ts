@@ -62,3 +62,11 @@ export type DeleteDataRequestResponse = {
   };
   notes: string[];
 };
+
+export type DeleteAccountResult = {
+  deletedAt: string;
+  /** Whether the Stripe subscription was successfully canceled before auth deletion. */
+  stripeCanceled: boolean;
+  /** The Stripe customer ID that was associated with the account, if any. */
+  stripeCustomerId: string | null;
+};

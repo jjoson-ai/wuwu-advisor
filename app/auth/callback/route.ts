@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { isAgeVerified } from "@/lib/auth";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
@@ -23,6 +24,19 @@ export async function GET(request: NextRequest) {
         requestUrl.origin,
       ),
     );
+  }
+
+  // After successful OAuth exchange, check the age gate.
+  // New users (and existing users who predate the gate) will not have
+  // age_verified set in app_metadata and must confirm before proceeding.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!isAgeVerified(user)) {
+    const ageGateUrl = new URL("/age-gate", requestUrl.origin);
+    ageGateUrl.searchParams.set("next", next);
+    return NextResponse.redirect(ageGateUrl);
   }
 
   return NextResponse.redirect(new URL(next, requestUrl.origin));

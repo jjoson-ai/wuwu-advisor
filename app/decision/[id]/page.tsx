@@ -3,10 +3,16 @@ import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 
 import { AskFollowUpForm } from "@/components/ask-follow-up-form";
+import { DecisionLogForm } from "@/components/decision-log-form";
+import { DecisionOutcomeForm } from "@/components/decision-outcome-form";
 import {
   formatDecisionGuidanceForPage,
   formatStanceLabel,
 } from "@/domain/decision/decision.formatter";
+import {
+  getDecisionLog,
+  getOverdueDecisionLogs,
+} from "@/domain/decision/decision-log.service";
 import { highlightAstroTerms } from "@/domain/display/astro-terms";
 import { splitDisplayParagraphs } from "@/domain/display/narrative-display";
 import { createNumerologyMentionFormatter } from "@/domain/display/numerology-mentions";
@@ -70,6 +76,21 @@ export default async function ConversationPage({
   const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
   const suggestedFollowups = lastTurn?.suggested_followups ?? [];
   const atTurnLimit = turns.length >= 10;
+
+  // Decision log for this guidance — null if the migration hasn't run yet
+  // (getDecisionLog returns null silently on schema errors, but throws on
+  // other errors so we catch here to not break the page).
+  const decisionLog = await getDecisionLog(user.id, initialGuidance.id).catch(
+    () => null,
+  );
+
+  // Today in local ISO date for overdue check. We default to UTC here;
+  // the component can refine on the client if needed.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const logIsOverdue =
+    decisionLog !== null &&
+    decisionLog.outcome === null &&
+    decisionLog.revisit_at <= todayIso;
 
   return (
     <div className="stack">
@@ -180,6 +201,19 @@ export default async function ConversationPage({
           ))}
         </div>
       ) : null}
+
+      {/* Decision log / outcome follow-up */}
+      {logIsOverdue && decisionLog !== null ? (
+        <DecisionOutcomeForm
+          log={decisionLog}
+          questionText={initialGuidance.question_text}
+        />
+      ) : (
+        <DecisionLogForm
+          decisionGuidanceId={initialGuidance.id}
+          existingLog={decisionLog}
+        />
+      )}
 
       <AskFollowUpForm
         conversationId={conversationId}

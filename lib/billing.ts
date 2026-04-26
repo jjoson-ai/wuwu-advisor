@@ -15,6 +15,25 @@ export function getStripeProPriceId() {
   return priceId;
 }
 
+export function getStripeProAnnualPriceId() {
+  const priceId = process.env.STRIPE_PRO_ANNUAL_PRICE_ID;
+
+  if (priceId == null || priceId === "") {
+    throw new Error("Missing STRIPE_PRO_ANNUAL_PRICE_ID.");
+  }
+
+  return priceId;
+}
+
+export type PlanType = "monthly" | "annual";
+
+export function getStripePriceIdForPlan(plan: PlanType) {
+  return plan === "annual" ? getStripeProAnnualPriceId() : getStripeProPriceId();
+}
+
+/** Annual plan gets a 7-day free trial; monthly goes straight to paid. */
+export const ANNUAL_TRIAL_DAYS = 7;
+
 async function getUserById(userId: string) {
   const supabaseAdmin = getSupabaseAdminClient();
   const currentUserResult = await supabaseAdmin.auth.admin.getUserById(userId);

@@ -1,17 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import {
   readTrackingPreference,
   writeTrackingPreference,
 } from "@/lib/tracking-preferences";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export function PrivacyDataSection() {
+  const router = useRouter();
   const [trackingEnabled, setTrackingEnabled] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [isSubmittingDelete, setIsSubmittingDelete] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     const saved = readTrackingPreference();
@@ -21,8 +25,9 @@ export function PrivacyDataSection() {
     }
   }, []);
 
-  async function handleDeleteRequest() {
+  async function handleDeleteConfirmed() {
     setIsSubmittingDelete(true);
+    setConfirmDeleteOpen(false);
     setStatus("");
 
     try {
@@ -32,18 +37,18 @@ export function PrivacyDataSection() {
       const payload = (await response.json()) as { error?: string; message?: string };
 
       if (response.ok === false) {
-        throw new Error(payload.error || "Unable to submit deletion request.");
+        throw new Error(payload.error || "Unable to delete account.");
       }
 
-      setStatus(
-        payload.message ||
-          "Deletion request received. A team member will process it manually. This can take up to 30 days, and some billing records may be retained to satisfy legal obligations.",
-      );
+      // Sign out locally, then redirect to home. The auth session is now invalid
+      // because the account no longer exists in Supabase.
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.signOut();
+      router.push("/?deleted=1");
     } catch (error) {
       setStatus(
-        error instanceof Error ? error.message : "Unable to submit deletion request.",
+        error instanceof Error ? error.message : "Unable to delete account.",
       );
-    } finally {
       setIsSubmittingDelete(false);
     }
   }
@@ -93,26 +98,81 @@ export function PrivacyDataSection() {
         </div>
 
         <div className="field">
+          <span>AI data handling</span>
+          <small className="muted">
+            Your questions are sent pseudonymised (using an internal ID, not your
+            email) to Anthropic to generate responses. Our agreement with Anthropic
+            prohibits using API data to train their models.{" "}
+            <a href="/privacy" className="muted">
+              See subprocessors &amp; privacy policy
+            </a>
+            .
+          </small>
+        </div>
+
+        <div className="field">
+          <span>Things Wuwu remembers</span>
+          <small className="muted">
+            Wuwu extracts durable facts from your Ask conversations to personalise
+            future responses. You can view, delete individual facts, or delete
+            everything at any time.
+          </small>
+          <a className="button secondary" href="/privacy/facts">
+            View &amp; manage
+          </a>
+        </div>
+
+        <div className="field">
           <span>Data rights</span>
           <small className="muted">
-            Download covers first-party app data in the current build. Deletion is
-            manual and may take up to 30 days, and some billing records will be
+            Download covers first-party app data. Account deletion is immediate and
+            permanent — all your data will be removed. Some billing records may be
             retained to satisfy legal obligations.
           </small>
           <div className="row">
             <a className="button secondary" href="/api/account/export">
               Download my data
             </a>
-            <button
-              className="button secondary"
-              disabled={isSubmittingDelete}
-              onClick={() => {
-                void handleDeleteRequest();
-              }}
-              type="button"
-            >
-              {isSubmittingDelete ? "Submitting..." : "Delete my account"}
-            </button>
+            {confirmDeleteOpen ? (
+              <div className="stack" style={{ gap: "0.4rem" }}>
+                <p className="muted" style={{ margin: 0, fontSize: "0.9rem" }}>
+                  This will permanently delete your account and all your data. This
+                  cannot be undone.
+                </p>
+                <div className="row">
+                  <button
+                    className="button danger"
+                    disabled={isSubmittingDelete}
+                    onClick={() => {
+                      void handleDeleteConfirmed();
+                    }}
+                    type="button"
+                  >
+                    {isSubmittingDelete ? "Deleting..." : "Yes, delete everything"}
+                  </button>
+                  <button
+                    className="button secondary"
+                    disabled={isSubmittingDelete}
+                    onClick={() => setConfirmDeleteOpen(false)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="button secondary"
+                disabled={isSubmittingDelete}
+                onClick={() => {
+                  setConfirmDeleteOpen(true);
+                  setStatus("");
+                }}
+                type="button"
+              >
+                Delete my account
+              </button>
+            )}
           </div>
         </div>
       </div>

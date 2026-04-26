@@ -42,16 +42,38 @@ import {
 import { appUi } from "@/theme/app-ui";
 import { brandColors, brandRadii, brandSpacing } from "@/theme/brand";
 import type {
-  ActedOnValue,
   BriefingFeedback,
   FormattedTodayBriefing,
+  RatingEmojiValue,
+  RatingThemeValue,
 } from "@/types/api";
 
-const FEEDBACK_OPTIONS: Array<{ value: ActedOnValue; label: string }> = [
-  { value: "yes", label: "Yes" },
-  { value: "partial", label: "Partly" },
-  { value: "no", label: "No" },
+// Mirrors EMOJI_LABELS in the web component + feedback.types.ts.
+const EMOJI_OPTIONS: Array<{
+  value: RatingEmojiValue;
+  icon: string;
+  headline: string;
+  blurb: string;
+}> = [
+  { value: "nailed_it", icon: "🎯", headline: "Nailed it", blurb: "Matched today." },
+  { value: "vague", icon: "🌫️", headline: "Vague", blurb: "Too generic." },
+  { value: "off", icon: "🙃", headline: "Off", blurb: "Read my day wrong." },
 ];
+
+const THEME_OPTIONS: Array<{ value: RatingThemeValue; label: string }> = [
+  { value: "career", label: "Career" },
+  { value: "money", label: "Money" },
+  { value: "relationships", label: "Relationships" },
+  { value: "health", label: "Health" },
+  { value: "personal_growth", label: "Growth" },
+  { value: "timing", label: "Timing" },
+];
+
+function toggleArrayValue<T>(list: readonly T[], value: T): T[] {
+  return list.includes(value)
+    ? list.filter((item) => item !== value)
+    : [...list, value];
+}
 
 function formatDisplayDate(value: string) {
   const parsed = new Date(`${value}T12:00:00`);
@@ -76,8 +98,9 @@ type TodayFeedbackCardProps = {
   feedback: BriefingFeedback | null;
   isSaving: boolean;
   onSave: (input: {
-    usefulnessScore: number;
-    actedOn: ActedOnValue;
+    ratingEmoji: RatingEmojiValue;
+    ratingThemeHit: RatingThemeValue[];
+    ratingThemeMiss: RatingThemeValue[];
     note: string | null;
   }) => Promise<void>;
 };
@@ -88,31 +111,56 @@ function TodayFeedbackCard({
   isSaving,
   onSave,
 }: TodayFeedbackCardProps) {
-  const [usefulnessScore, setUsefulnessScore] = useState<number>(
-    feedback?.usefulness_score ?? 4,
+  const [ratingEmoji, setRatingEmoji] = useState<RatingEmojiValue | null>(
+    feedback?.rating_emoji ?? null,
   );
-  const [actedOn, setActedOn] = useState<ActedOnValue>(
-    feedback?.acted_on ?? "partial",
+  const [themeHit, setThemeHit] = useState<RatingThemeValue[]>(
+    feedback?.rating_theme_hit ?? [],
+  );
+  const [themeMiss, setThemeMiss] = useState<RatingThemeValue[]>(
+    feedback?.rating_theme_miss ?? [],
   );
   const [note, setNote] = useState(feedback?.note ?? "");
   const [status, setStatus] = useState<string | null>(null);
 
+  // Sync local state with remote when the feedback row updates (e.g. after
+  // the mutation's invalidate refetches `feedback`).
   useEffect(() => {
-    setUsefulnessScore(feedback?.usefulness_score ?? 4);
-    setActedOn(feedback?.acted_on ?? "partial");
+    setRatingEmoji(feedback?.rating_emoji ?? null);
+    setThemeHit(feedback?.rating_theme_hit ?? []);
+    setThemeMiss(feedback?.rating_theme_miss ?? []);
     setNote(feedback?.note ?? "");
   }, [feedback]);
+
+  const isExistingRating =
+    feedback?.briefing_id === briefingId && feedback.rating_emoji !== null;
+
+  function toggleHit(theme: RatingThemeValue) {
+    setThemeHit((prev) => toggleArrayValue(prev, theme));
+    setThemeMiss((prev) => prev.filter((item) => item !== theme));
+  }
+
+  function toggleMiss(theme: RatingThemeValue) {
+    setThemeMiss((prev) => toggleArrayValue(prev, theme));
+    setThemeHit((prev) => prev.filter((item) => item !== theme));
+  }
 
   async function handleSave() {
     setStatus(null);
 
+    if (ratingEmoji === null) {
+      setStatus("Pick a rating first.");
+      return;
+    }
+
     try {
       await onSave({
-        usefulnessScore,
-        actedOn,
+        ratingEmoji,
+        ratingThemeHit: themeHit,
+        ratingThemeMiss: themeMiss,
         note: note.trim() === "" ? null : note.trim(),
       });
-      setStatus("Feedback saved.");
+      setStatus("Thanks — this tunes future briefings.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to save feedback.");
     }
@@ -120,90 +168,148 @@ function TodayFeedbackCard({
 
   return (
     <View style={styles.card}>
-      <Text style={styles.sectionTitle}>Your feedback</Text>
+      <Text style={styles.sectionTitle}>Rate this briefing</Text>
       <Text style={styles.supportingText}>
-        Save feedback on the current Today guidance only.
+        One tap helps us calibrate your chart. Details optional.
       </Text>
 
       <View style={styles.feedbackSection}>
-        <Text style={styles.fieldLabel}>How useful was it?</Text>
-        <View style={styles.scoreRow}>
-          {[1, 2, 3, 4, 5].map((score) => (
-            <Pressable
-              key={score}
-              onPress={() => setUsefulnessScore(score)}
-              style={[
-                styles.scoreButton,
-                usefulnessScore === score && styles.scoreButtonActive,
-              ]}
-            >
-              <Text
+        <View style={styles.emojiRow}>
+          {EMOJI_OPTIONS.map((option) => {
+            const selected = ratingEmoji === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                onPress={() => setRatingEmoji(option.value)}
                 style={[
-                  styles.scoreButtonText,
-                  usefulnessScore === score && styles.scoreButtonTextActive,
+                  styles.emojiButton,
+                  selected && styles.emojiButtonActive,
                 ]}
               >
-                {score}
-              </Text>
-            </Pressable>
-          ))}
+                <Text style={styles.emojiIcon}>{option.icon}</Text>
+                <Text style={styles.emojiHeadline}>{option.headline}</Text>
+                <Text style={styles.emojiBlurb}>{option.blurb}</Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
-      <View style={styles.feedbackSection}>
-        <Text style={styles.fieldLabel}>Did you act on it?</Text>
-        <View style={styles.segmentRow}>
-          {FEEDBACK_OPTIONS.map((option) => (
-            <Pressable
-              key={option.value}
-              onPress={() => setActedOn(option.value)}
-              style={[
-                styles.segmentButton,
-                actedOn === option.value && styles.segmentButtonActive,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.segmentButtonText,
-                  actedOn === option.value && styles.segmentButtonTextActive,
-                ]}
-              >
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
+      {ratingEmoji !== null ? (
+        <>
+          <ThemeChipGroup
+            heading="What hit?"
+            helper="Tap cards that matched today."
+            selected={themeHit}
+            disabled={themeMiss}
+            onToggle={toggleHit}
+            tone="hit"
+          />
 
-      <View style={styles.feedbackSection}>
-        <Text style={styles.fieldLabel}>Notes</Text>
-        <TextInput
-          multiline
-          onChangeText={setNote}
-          placeholder="What landed or missed?"
-          placeholderTextColor={brandColors.textSubtle}
-          style={styles.textArea}
-          value={note}
-        />
-      </View>
+          <ThemeChipGroup
+            heading="What missed?"
+            helper="Tap anything the briefing got wrong."
+            selected={themeMiss}
+            disabled={themeHit}
+            onToggle={toggleMiss}
+            tone="miss"
+          />
+
+          <View style={styles.feedbackSection}>
+            <Text style={styles.fieldLabel}>Notes (optional)</Text>
+            <TextInput
+              multiline
+              onChangeText={setNote}
+              placeholder="What was the actual day about?"
+              placeholderTextColor={brandColors.textSubtle}
+              style={styles.textArea}
+              value={note}
+            />
+          </View>
+        </>
+      ) : null}
 
       <Pressable
-        disabled={isSaving}
+        disabled={isSaving || ratingEmoji === null}
         onPress={() => {
           void handleSave();
         }}
-        style={[styles.primaryButton, isSaving && styles.primaryButtonDisabled]}
+        style={[
+          styles.primaryButton,
+          (isSaving || ratingEmoji === null) && styles.primaryButtonDisabled,
+        ]}
       >
         {isSaving ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
           <Text style={styles.primaryButtonText}>
-            {feedback?.briefing_id === briefingId ? "Update feedback" : "Save feedback"}
+            {isExistingRating ? "Update rating" : "Submit rating"}
           </Text>
         )}
       </Pressable>
 
       <Text style={styles.statusText}>{status ?? " "}</Text>
+    </View>
+  );
+}
+
+type ThemeChipGroupProps = {
+  heading: string;
+  helper: string;
+  selected: RatingThemeValue[];
+  disabled: RatingThemeValue[];
+  onToggle: (value: RatingThemeValue) => void;
+  tone: "hit" | "miss";
+};
+
+function ThemeChipGroup({
+  heading,
+  helper,
+  selected,
+  disabled,
+  onToggle,
+  tone,
+}: ThemeChipGroupProps) {
+  const selectedSet = new Set(selected);
+  const disabledSet = new Set(disabled);
+
+  return (
+    <View style={styles.feedbackSection}>
+      <Text style={styles.fieldLabel}>{heading}</Text>
+      <Text style={styles.supportingText}>{helper}</Text>
+      <View style={styles.chipRow}>
+        {THEME_OPTIONS.map((option) => {
+          const isSelected = selectedSet.has(option.value);
+          const isDisabled = disabledSet.has(option.value);
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSelected, disabled: isDisabled }}
+              disabled={isDisabled}
+              onPress={() => onToggle(option.value)}
+              style={[
+                styles.chip,
+                isSelected && tone === "hit" && styles.chipActiveHit,
+                isSelected && tone === "miss" && styles.chipActiveMiss,
+                isDisabled && styles.chipDisabled,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  isSelected && styles.chipTextActive,
+                  isDisabled && styles.chipTextDisabled,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -386,8 +492,9 @@ export function TodayScreenContent() {
   }
 
   async function handleSaveFeedback(input: {
-    usefulnessScore: number;
-    actedOn: ActedOnValue;
+    ratingEmoji: RatingEmojiValue;
+    ratingThemeHit: RatingThemeValue[];
+    ratingThemeMiss: RatingThemeValue[];
     note: string | null;
   }) {
     if (briefing === null) {
@@ -396,8 +503,9 @@ export function TodayScreenContent() {
 
     await feedbackMutation.mutateAsync({
       briefingId: briefing.id,
-      usefulnessScore: input.usefulnessScore,
-      actedOn: input.actedOn,
+      ratingEmoji: input.ratingEmoji,
+      ratingThemeHit: input.ratingThemeHit,
+      ratingThemeMiss: input.ratingThemeMiss,
       note: input.note,
     });
   }
@@ -844,54 +952,76 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  scoreRow: {
+  emojiRow: {
     flexDirection: "row",
     gap: 8,
   },
-  scoreButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: 44,
-    height: 44,
-    borderRadius: brandRadii.pill,
-    borderWidth: 1,
-    borderColor: brandColors.border,
-  },
-  scoreButtonActive: {
-    borderColor: brandColors.accent,
-    backgroundColor: brandColors.accentSoft,
-  },
-  scoreButtonText: {
-    color: brandColors.text,
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  scoreButtonTextActive: {
-    color: brandColors.accent,
-  },
-  segmentRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  segmentButton: {
+  emojiButton: {
     flex: 1,
     alignItems: "center",
+    justifyContent: "flex-start",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: brandRadii.control,
     borderWidth: 1,
     borderColor: brandColors.border,
-    borderRadius: brandRadii.control,
-    paddingVertical: 12,
+    backgroundColor: brandColors.surface,
+    gap: 4,
   },
-  segmentButtonActive: {
+  emojiButtonActive: {
     borderColor: brandColors.accent,
+    borderWidth: 2,
     backgroundColor: brandColors.accentSoft,
   },
-  segmentButtonText: {
+  emojiIcon: {
+    fontSize: 26,
+    lineHeight: 32,
+  },
+  emojiHeadline: {
     color: brandColors.text,
     fontSize: 14,
     fontWeight: "600",
   },
-  segmentButtonTextActive: {
-    color: brandColors.accent,
+  emojiBlurb: {
+    color: brandColors.textMuted,
+    fontSize: 11,
+    lineHeight: 14,
+    textAlign: "center",
+  },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: brandRadii.pill,
+    borderWidth: 1,
+    borderColor: brandColors.border,
+    backgroundColor: brandColors.surface,
+  },
+  chipActiveHit: {
+    borderColor: "#15803d",
+    backgroundColor: "#15803d",
+  },
+  chipActiveMiss: {
+    borderColor: "#b42318",
+    backgroundColor: "#b42318",
+  },
+  chipDisabled: {
+    opacity: 0.4,
+  },
+  chipText: {
+    color: brandColors.text,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  chipTextActive: {
+    color: "#FFFFFF",
+  },
+  chipTextDisabled: {
+    color: brandColors.textSubtle,
   },
   textArea: {
     borderWidth: 1,

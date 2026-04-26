@@ -16,6 +16,12 @@ import {
   type DecisionGuidance,
 } from "@/domain/decision/decision.types";
 import type { NumerologyContext } from "@/domain/numerology/context";
+import {
+  CULT_PHRASE_RULES,
+  FINANCIAL_SAFETY_RULES,
+  LIFE_DECISION_COACH_RULES,
+  isLifeStakesQuestion,
+} from "@/domain/safety/prompt-rules";
 import { assertNoForbiddenInternalTermsInUserOutput } from "@/lib/output-safety";
 
 type DecisionAgentInput = {
@@ -37,6 +43,9 @@ type DecisionAgentInput = {
   latestBriefing: unknown | null;
   latestForecast: unknown | null;
   latestBlueprint: unknown | null;
+  // Injected by the route after retrieval. Null when MEMORY_INJECTION_ENABLED
+  // is off or when no relevant facts exist for this user.
+  rememberedFacts?: string | null;
 };
 
 function getDecisionTypeInstructions(decisionType: DecisionType) {
@@ -93,7 +102,15 @@ function buildDecisionSystemPrompt(
   decisionHorizon: DecisionHorizon,
   decisionIntent: DecisionIntent,
   decisionFeasibility: DecisionFeasibility,
+  lifeStakesDetected: boolean,
 ) {
+  const lifeStakesReinforcement = lifeStakesDetected
+    ? [
+        "Deterministic life-stakes signal: this question contains an irreversible life-decision framing. Decision Coach mode is mandatory for this response.",
+        "You must not render a directive verdict on whether to leave, quit, end, stay, break up, move, sell, or disclose. Reflect the tension, surface two or three chart-based considerations, pose three concrete questions for the user to sit with, and name the appropriate human professional for the domain.",
+      ]
+    : [];
+
   return [
     "Return exactly one JSON object and nothing else.",
     "Do not write markdown, commentary, or extra keys.",
@@ -103,6 +120,10 @@ function buildDecisionSystemPrompt(
     "Be grounded, practical, human, and concise.",
     "Avoid vague horoscope filler, doom language, and overclaiming certainty.",
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
+    ...FINANCIAL_SAFETY_RULES,
+    ...CULT_PHRASE_RULES,
+    ...LIFE_DECISION_COACH_RULES,
+    ...lifeStakesReinforcement,
     "Reject generic phrasing such as 'today is a good day' or 'you may feel'.",
     "Instead describe the specific tradeoff, action, or timing posture at stake.",
     "Use the user's stable profile plus current context when relevant.",
@@ -151,6 +172,10 @@ function buildDecisionSystemPrompt(
 function buildDecisionUserPrompt(input: DecisionAgentInput) {
   return JSON.stringify(
     {
+      // remembered_facts is injected from the memory pipeline. Included in the
+      // user prompt (not system prompt) so it does not invalidate system prompt
+      // caching. Null when memory is disabled or no facts exist.
+      remembered_facts: input.rememberedFacts ?? null,
       question: input.question,
       decision_type: input.decisionType,
       decision_horizon: input.decisionHorizon,
@@ -181,6 +206,7 @@ export function buildDecisionAgentRequest(input: DecisionAgentInput) {
       input.decisionHorizon,
       input.decisionIntent,
       input.decisionFeasibility,
+      isLifeStakesQuestion(input.question),
     ),
     userPrompt: buildDecisionUserPrompt(input),
     outputSchema: DecisionGuidanceSchema,

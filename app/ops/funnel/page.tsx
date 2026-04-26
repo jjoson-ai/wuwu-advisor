@@ -378,8 +378,9 @@ export default async function FunnelPage() {
           emptyMessage="No upgrades yet. Will populate once users activate Pro."
         />
         <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-          Bucket "3 – 7 days (trial)" aligns with the 3-day free trial window.
-          Upgrades in this bucket are likely trial-to-paid conversions.
+          Bucket "7 – 10 days (trial)" aligns with the 7-day free trial window.
+          Upgrades in this bucket are likely trial-to-paid conversions on the
+          annual plan.
         </p>
       </section>
 
