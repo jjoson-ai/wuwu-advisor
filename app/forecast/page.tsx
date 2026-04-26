@@ -298,16 +298,20 @@ export default async function ForecastPage() {
               bullets={FORECAST_LOCKED_BULLETS}
             />
           ) : (
+            // UX audit C-02 (2026-04-26): value-led hierarchy.
+            // Eyebrow names the feature ("Pro forecast"), headline is the
+            // benefit, billing meta sits below the CTA at the smallest type.
             <LockedFeatureCard
               data-testid="forecast-upgrade-paywall"
               featured
               ctaLabel="Start 7-day free trial"
-              description="Pro unlocks the deeper planning sections — so each month's guidance gets measurably more specific to where your effort belongs."
-              statusLabel="Included in Pro"
-              title="Unlock your full Forecast"
+              description="See the next 30 days the way Wuwu sees them — what's gaining momentum, what to build steadily, and where the month's pivots are likely to land."
+              statusLabel="Pro forecast"
+              title="See your next 30 days, in depth."
               feature="forecast"
               upgradeSurface="forecast_consolidated_paywall"
               bullets={FORECAST_LOCKED_BULLETS}
+              planMeta="7-day free trial · then $89.99/yr or $14.99/mo · cancel anytime"
             />
           )}
         </div>

@@ -6,7 +6,11 @@ import type {
 } from "@/domain/astrology/schemas";
 import type { ModalitySignal } from "@/domain/modality/modality.types";
 import type { NumerologyContext } from "@/domain/numerology/context";
-import { CULT_PHRASE_RULES, FINANCIAL_SAFETY_RULES } from "@/domain/safety/prompt-rules";
+import {
+  CULT_PHRASE_RULES,
+  FINANCIAL_SAFETY_RULES,
+  VOICE_DISCIPLINE_RULES,
+} from "@/domain/safety/prompt-rules";
 import type { FreeAstroDailyContext } from "@/lib/freeastroapi";
 
 function getBirthTimeSpecificityRule(input: DailyBriefingInput) {
@@ -26,6 +30,7 @@ function buildSharedSystemRules(input: DailyBriefingInput) {
     "Do not give medical, legal, or financial guarantees.",
     ...FINANCIAL_SAFETY_RULES,
     ...CULT_PHRASE_RULES,
+    ...VOICE_DISCIPLINE_RULES,
     "Keep guidance concise, specific, and easy to act on in real life.",
     "Prefer tradeoffs and contrasts over vague encouragement.",
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
@@ -93,6 +98,7 @@ export function westernSystemPrompt(input: DailyBriefingInput) {
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
     ...FINANCIAL_SAFETY_RULES,
     ...CULT_PHRASE_RULES,
+    ...VOICE_DISCIPLINE_RULES,
     getBirthTimeSpecificityRule(input),
     `Tone preference: ${input.tone_preference}.`,
     `Date context: ${input.date} (${input.weekday}) in ${input.timezone}.`,

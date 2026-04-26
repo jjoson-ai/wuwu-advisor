@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import {
@@ -13,6 +13,8 @@ import {
   TONE_PREFERENCE_OPTIONS,
 } from "@/lib/config";
 import {
+  detectBrowserTimeZone,
+  formatTimeZoneLabel,
   getSafeTimeZone,
   getSupportedTimeZones,
   isSupportedTimeZone,
@@ -49,7 +51,32 @@ export function OnboardingForm({
   const [state, formAction] = useActionState(saveOnboardingAction, initialState);
   const hasInvalidSavedTimezone =
     initialValues.timezone !== "" && isSupportedTimeZone(initialValues.timezone) === false;
-  const selectedTimezone = getSafeTimeZone(initialValues.timezone);
+
+  // UX audit C-01 (2026-04-26): detect browser timezone on mount and pre-fill
+  // when the user has no saved value. The raw IANA picker stays available
+  // behind a "Change" toggle so users in atypical setups (VPNs, travelers)
+  // can still override.
+  const hasSavedTimezone =
+    initialValues.timezone !== "" && isSupportedTimeZone(initialValues.timezone);
+  const [timezone, setTimezone] = useState<string>(
+    getSafeTimeZone(initialValues.timezone),
+  );
+  const [detectedTz, setDetectedTz] = useState<string | null>(null);
+  const [showTzPicker, setShowTzPicker] = useState<boolean>(hasInvalidSavedTimezone);
+
+  useEffect(() => {
+    if (hasSavedTimezone) {
+      // Returning user with a valid saved zone — leave it alone.
+      return;
+    }
+    const detected = detectBrowserTimeZone();
+    if (detected != null) {
+      setDetectedTz(detected);
+      setTimezone(detected);
+    }
+  }, [hasSavedTimezone]);
+
+  const tzLabel = formatTimeZoneLabel(timezone);
 
   return (
     <form action={formAction} className="stack">
@@ -72,22 +99,110 @@ export function OnboardingForm({
             />
           </label>
 
+          {/* UX audit C-01 (2026-04-26): detect browser timezone, render as
+              pre-filled value with a "Change" affordance. The labeled <select>
+              is always mounted (visually hidden when collapsed) so the
+              Playwright smoke test's getByLabel("Current timezone") still
+              resolves a usable form control. The visual preview is the
+              friendlier surface; the picker is the override path. */}
           <label className="field">
             <span>Current timezone</span>
-            <select defaultValue={selectedTimezone} name="timezone" required>
+            <select
+              name="timezone"
+              value={timezone}
+              onChange={(event) => setTimezone(event.target.value)}
+              required
+              data-testid="onboarding-timezone-select"
+              style={
+                showTzPicker
+                  ? undefined
+                  : {
+                      // Visually-hidden but still operable for keyboard /
+                      // automation. Matches the WAI-ARIA "sr-only" pattern.
+                      position: "absolute",
+                      width: 1,
+                      height: 1,
+                      padding: 0,
+                      margin: -1,
+                      overflow: "hidden",
+                      clip: "rect(0, 0, 0, 0)",
+                      whiteSpace: "nowrap",
+                      border: 0,
+                    }
+              }
+            >
               {TIME_ZONE_OPTIONS.map((timeZone) => (
                 <option key={timeZone} value={timeZone}>
                   {timeZone}
                 </option>
               ))}
             </select>
-            <small className="muted">Use the timezone where you currently live.</small>
-            {hasInvalidSavedTimezone ? (
-              <small className="muted">
-                Your saved timezone was not recognized. Pick a valid timezone such as
-                Europe/Madrid.
-              </small>
-            ) : null}
+
+            {showTzPicker ? (
+              <>
+                <small className="muted">
+                  Type the IANA name of the city or region you live in (e.g.
+                  Europe/Madrid, America/New_York).
+                </small>
+                {hasInvalidSavedTimezone ? (
+                  <small className="muted">
+                    Your saved timezone wasn&apos;t recognized — pick the closest
+                    match.
+                  </small>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    justifyContent: "space-between",
+                    gap: "0.75rem",
+                    flexWrap: "wrap",
+                    padding: "0.55rem 0.75rem",
+                    background: "var(--surface-raised, rgba(0,0,0,0.04))",
+                    borderRadius: "0.5rem",
+                  }}
+                >
+                  <div style={{ display: "grid", gap: "0.1rem", minWidth: 0 }}>
+                    <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>
+                      {timezone}
+                    </span>
+                    {tzLabel !== timezone ? (
+                      <span
+                        className="muted"
+                        style={{ fontSize: "0.85rem", lineHeight: 1.4 }}
+                      >
+                        {tzLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowTzPicker(true)}
+                    style={{
+                      appearance: "none",
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      color: "var(--accent)",
+                      fontSize: "0.88rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    Change
+                  </button>
+                </div>
+                <small className="muted">
+                  {detectedTz != null && detectedTz === timezone
+                    ? `We detected ${timezone}. Change it if that's wrong.`
+                    : "Use the timezone where you currently live."}
+                </small>
+              </>
+            )}
           </label>
 
           <label className="field" style={{ gridColumn: "1 / -1" }}>

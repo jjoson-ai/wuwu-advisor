@@ -16,7 +16,11 @@ import {
   type Blueprint,
 } from "@/domain/blueprint/blueprint.types";
 import type { NumerologyContext } from "@/domain/numerology/context";
-import { CULT_PHRASE_RULES, FINANCIAL_SAFETY_RULES } from "@/domain/safety/prompt-rules";
+import {
+  CULT_PHRASE_RULES,
+  FINANCIAL_SAFETY_RULES,
+  VOICE_DISCIPLINE_RULES,
+} from "@/domain/safety/prompt-rules";
 import { sanitizeForbiddenInternalTermsInUserOutput } from "@/lib/output-safety";
 
 type BlueprintAgentInput = {
@@ -58,6 +62,7 @@ export function buildBlueprintSystemPrompt(
     "Avoid mystical filler, doom language, and generic corporate personality language.",
     ...FINANCIAL_SAFETY_RULES,
     ...CULT_PHRASE_RULES,
+    ...VOICE_DISCIPLINE_RULES,
     "Focus on how the person tends to operate: strengths, friction points, connection style, work and money style, energy and stress pattern, and growth edge.",
     "Astrology and numerology should feel co-equal. Astrology should mainly explain emotional makeup, communication tone, relationship style, and energy or stress style.",
     "Numerology should mainly explain life lesson, motivation, long-term operating style, leadership or service orientation, purpose pattern, and growth edge.",

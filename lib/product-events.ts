@@ -43,6 +43,10 @@ export const ProductEventNameSchema = z.enum([
   "accuracy_report_viewed",
   "decision_logged",
   "decision_outcome_submitted",
+  // UX audit C-03 (2026-04-26) — memory page discoverability telemetry
+  "memory_intro_toast_shown",
+  "memory_intro_toast_clicked",
+  "memory_intro_toast_dismissed",
 ]);
 
 export type ProductPlatform = z.infer<typeof ProductPlatformSchema>;

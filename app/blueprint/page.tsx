@@ -322,15 +322,17 @@ export default async function BlueprintPage() {
                   bullets={lockedBullets}
                 />
               ) : (
+                // UX audit C-02 (2026-04-26): value-led hierarchy.
                 <LockedFeatureCard
                   featured
-                  statusLabel="Included in Pro"
-                  title="Unlock your full Blueprint"
-                  description="Pro unlocks the deeper pattern sections and the full signature data for a sharper, more specific read of how you decide."
+                  statusLabel="Pro Blueprint"
+                  title="See the full pattern, the way Wuwu reads it."
+                  description="Every Pro generation pulls in your deeper Blueprint signature, so Today, Forecast, and Decisions get more personal — less generic, more about your shape."
                   ctaLabel="Start 7-day free trial"
                   feature="blueprint"
                   upgradeSurface="blueprint_consolidated_paywall"
                   bullets={lockedBullets}
+                  planMeta="7-day free trial · then $89.99/yr or $14.99/mo · cancel anytime"
                 />
               )}
             </>

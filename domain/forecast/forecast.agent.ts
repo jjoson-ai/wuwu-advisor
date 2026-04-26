@@ -17,7 +17,11 @@ import {
   type ForecastHorizon,
 } from "@/domain/forecast/forecast.types";
 import type { NumerologyContext } from "@/domain/numerology/context";
-import { CULT_PHRASE_RULES, FINANCIAL_SAFETY_RULES } from "@/domain/safety/prompt-rules";
+import {
+  CULT_PHRASE_RULES,
+  FINANCIAL_SAFETY_RULES,
+  VOICE_DISCIPLINE_RULES,
+} from "@/domain/safety/prompt-rules";
 import { assertNoForbiddenInternalTermsInUserOutput } from "@/lib/output-safety";
 
 type ForecastAgentInput = {
@@ -56,6 +60,7 @@ function buildForecastSystemPrompt(
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
     ...FINANCIAL_SAFETY_RULES,
     ...CULT_PHRASE_RULES,
+    ...VOICE_DISCIPLINE_RULES,
     "Reject generic phrasing such as 'today is a good day' or 'you may feel'.",
     "Do not use weekday-specific phrasing or intraday timing language.",
     "Instead describe the active phase, what is accumulating, what is gaining momentum, what should be built steadily, and what should not be forced.",

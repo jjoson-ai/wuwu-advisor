@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { ComponentType, SVGProps } from "react";
 
 import { BriefingFeedbackForm } from "@/components/briefing-feedback-form";
+import { MemoryIntroToast } from "@/components/memory-intro-toast";
 import {
   BoltIcon,
   BriefcaseIcon,
@@ -111,6 +112,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="stack">
+      {/* UX audit C-03 (2026-04-26): introduce the "What Wuwu remembers"
+          page on first fact extraction. Self-gates on a localStorage flag
+          and a fact-count check, so it appears once and only after there's
+          actually something to surface. */}
+      <MemoryIntroToast />
       {/* Tier 1: Hero */}
       <section className="card page-hero">
         <div className="page-hero-grid">

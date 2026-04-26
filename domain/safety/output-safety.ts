@@ -165,10 +165,82 @@ const DEATH_PREGNANCY_RULES: ReadonlyArray<RegexRule> = [
   },
 ];
 
+/**
+ * Cult-phrase / fate-language matchers — UX audit C-04 (2026-04-26).
+ *
+ * Wuwu's prompt rules already forbid these phrases (see CULT_PHRASE_RULES
+ * in domain/safety/prompt-rules.ts), but the LLM occasionally lets one slip.
+ * The Haiku judge catches most via the `fatalistic_determinism` rubric;
+ * these regexes are belt-and-suspenders so a verbatim slip never reaches
+ * the user. Word-boundary, case-insensitive.
+ *
+ * Detection routes through the existing block flow (safety_block payload,
+ * output_safety_blocked event, no save). No regen retry — at this stage of
+ * the pipeline the block-and-retry-from-scratch is more honest UX than a
+ * silent rewrite that might smear the rest of the response.
+ */
+const CULT_PHRASE_RULES: ReadonlyArray<RegexRule> = [
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bmeant to be\b/i,
+    rationale: "Output contains forbidden cult-phrase 'meant to be'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bdestin(?:y|ed)\b/i,
+    rationale: "Output contains fate-language 'destiny' / 'destined'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bfat(?:e|ed)\b/i,
+    rationale: "Output contains fate-language 'fate' / 'fated'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bwritten in the stars\b/i,
+    rationale: "Output contains forbidden phrase 'written in the stars'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bthe universe wants\b/i,
+    rationale: "Output contains forbidden phrase 'the universe wants'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\byou were born to\b/i,
+    rationale: "Output contains forbidden phrase 'you were born to'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bthe cosmos has decided\b/i,
+    rationale: "Output contains forbidden phrase 'the cosmos has decided'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bthe stars have chosen\b/i,
+    rationale: "Output contains forbidden phrase 'the stars have chosen'.",
+  },
+  {
+    category: "fatalistic_determinism",
+    severity: "high",
+    pattern: /\bcosmically inevitable\b/i,
+    rationale: "Output contains forbidden phrase 'cosmically inevitable'.",
+  },
+];
+
 const REGEX_RULES: ReadonlyArray<RegexRule> = [
   ...FINANCIAL_INSTRUMENT_RULES,
   ...DIRECTIVE_VERDICT_RULES,
   ...DEATH_PREGNANCY_RULES,
+  ...CULT_PHRASE_RULES,
 ];
 
 function runRegexPrefilter(text: string): OutputSafetyResult | null {
@@ -483,4 +555,5 @@ export const OUTPUT_SAFETY_RULE_COUNTS = {
   financialInstrument: FINANCIAL_INSTRUMENT_RULES.length,
   directiveVerdict: DIRECTIVE_VERDICT_RULES.length,
   deathPregnancy: DEATH_PREGNANCY_RULES.length,
+  cultPhrase: CULT_PHRASE_RULES.length,
 } as const;

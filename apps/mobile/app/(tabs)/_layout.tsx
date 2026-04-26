@@ -64,8 +64,10 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="today" options={{ title: "Today" }} />
       <Tabs.Screen name="blueprint" options={{ title: "Blueprint" }} />
-      <Tabs.Screen name="forecast" options={{ title: "Forecast" }} />
-      <Tabs.Screen name="ask" options={{ title: "Ask" }} />
+      {/* UX audit F-10 (2026-04-26): label = timeframe, not "Forecast". */}
+      <Tabs.Screen name="forecast" options={{ title: "10 days" }} />
+      {/* UX audit F-10 (2026-04-26): label matches /decision route purpose. */}
+      <Tabs.Screen name="ask" options={{ title: "Decisions" }} />
       <Tabs.Screen name="settings" options={{ title: "Settings" }} />
     </Tabs>
   );

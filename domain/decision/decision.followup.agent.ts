@@ -6,6 +6,7 @@ import {
   CULT_PHRASE_RULES,
   FINANCIAL_SAFETY_RULES,
   LIFE_DECISION_COACH_RULES,
+  VOICE_DISCIPLINE_RULES,
   isLifeStakesQuestion,
 } from "@/domain/safety/prompt-rules";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
@@ -65,6 +66,7 @@ export function buildFollowUpRequest(params: {
     "Do not mention internal terms like 'synthesis pass', 'routing', or model names.",
     ...FINANCIAL_SAFETY_RULES,
     ...CULT_PHRASE_RULES,
+    ...VOICE_DISCIPLINE_RULES,
     ...LIFE_DECISION_COACH_RULES,
     ...lifeStakesReinforcement,
   ].join("\n");

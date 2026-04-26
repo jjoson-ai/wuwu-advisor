@@ -15,6 +15,13 @@ type LockedFeatureCardProps = {
   upgradeSurface?: string;
   bullets?: string[];
   featured?: boolean;
+  /**
+   * Optional small-type billing line shown BELOW the CTA. UX audit C-02
+   * (2026-04-26): keep the price out of the eyebrow / headline so the
+   * persuasion order is value first, billing meta second. Pass strings
+   * like "then $14.99/mo · cancel anytime" — never the only price.
+   */
+  planMeta?: string;
   "data-testid"?: string;
 };
 
@@ -27,6 +34,7 @@ export function LockedFeatureCard({
   upgradeSurface,
   bullets,
   featured = false,
+  planMeta,
   "data-testid": dataTestId,
 }: LockedFeatureCardProps) {
   useEffect(() => {
@@ -121,6 +129,18 @@ export function LockedFeatureCard({
             upgradeSurface={upgradeSurface}
           />
         )}
+        {planMeta !== undefined && planMeta !== "" ? (
+          <p
+            className="muted"
+            style={{
+              margin: "0.6rem 0 0",
+              fontSize: "0.78rem",
+              letterSpacing: "0.01em",
+            }}
+          >
+            {planMeta}
+          </p>
+        ) : null}
       </div>
     </div>
   );

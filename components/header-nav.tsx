@@ -14,6 +14,10 @@ import {
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
+// UX audit F-10 (2026-04-26): "Forecast" overlaps semantically with "Today".
+// Renamed to "10 days" so the timeframe is the legible cue. "Ask" mismatched
+// its /decision route — renamed to "Decisions" so user expectation matches.
+// Routes unchanged so no analytics IDs or marketing links break.
 const NAV_ITEMS: ReadonlyArray<{
   href: string;
   label: string;
@@ -21,8 +25,8 @@ const NAV_ITEMS: ReadonlyArray<{
 }> = [
   { href: "/dashboard", label: "Today", Icon: SunIcon },
   { href: "/blueprint", label: "Blueprint", Icon: CompassIcon },
-  { href: "/forecast", label: "Forecast", Icon: TrendingIcon },
-  { href: "/decision", label: "Ask", Icon: MessageIcon },
+  { href: "/forecast", label: "10 days", Icon: TrendingIcon },
+  { href: "/decision", label: "Decisions", Icon: MessageIcon },
   { href: "/onboarding", label: "Settings", Icon: SlidersIcon },
 ];
 

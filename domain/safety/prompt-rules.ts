@@ -61,6 +61,131 @@ export const CULT_PHRASE_RULES: ReadonlyArray<string> = [
 ];
 
 /**
+ * Voice discipline rules — UX audit F-11 + F-12 (2026-04-26).
+ *
+ * F-11 — Hedge cap. Stacked hedges read as the model not believing itself
+ *   and corrode the trust the rest of the voice builds. One hedge max per
+ *   response; if the answer genuinely depends on uncertainty, say it once
+ *   and commit to the rest.
+ *
+ * F-12 — Jargon pairing. Astrology terms (transit, square, trine,
+ *   retrograde, house, etc.) must be paired with a plain-English gloss
+ *   on first use in any response. After first use the term may stand alone.
+ */
+export const VOICE_DISCIPLINE_RULES: ReadonlyArray<string> = [
+  "Use at most ONE hedge per response. Hedges include: might, could, perhaps, maybe, possibly, it's possible that, there's a chance, it depends, roughly, around, sort of, kind of. If the answer genuinely depends on a hedged judgment, say it once and then commit to the rest of the answer with confidence. Stacked hedges (two or more in the same response) read as the model not believing itself.",
+  "When you use astrology jargon — transit, progression, aspect, square, trine, conjunction, retrograde, house, cusp, ingress, stellium — pair it with a plain-English gloss on first use in the response. For example: 'Mercury squaring Saturn — a friction angle that often correlates with communication delays' or 'a Saturn-Pluto square (a 90° tension that asks for restructuring)'. After the first paired use, the term may stand alone. End-of-response jargon without a gloss is especially confusing — never finish on un-glossed jargon.",
+];
+
+/**
+ * Hedge list (F-11). Used by countHedges() and the verifier.
+ * Lowercase, word-boundary regex matching.
+ */
+const HEDGE_TERMS: ReadonlyArray<string> = [
+  "might",
+  "could",
+  "perhaps",
+  "maybe",
+  "possibly",
+  "it's possible that",
+  "there's a chance",
+  "it depends",
+  "roughly",
+  "around",
+  "sort of",
+  "kind of",
+];
+
+/**
+ * Astrology-jargon list (F-12). Terms that should be paired with a
+ * plain-English gloss on first use in any response.
+ */
+const JARGON_TERMS: ReadonlyArray<string> = [
+  "transit",
+  "progression",
+  "aspect",
+  "square",
+  "trine",
+  "conjunction",
+  "retrograde",
+  "house",
+  "cusp",
+  "ingress",
+  "stellium",
+];
+
+/**
+ * Word-boundary regex for a list of phrases. Phrases with internal
+ * whitespace are matched verbatim against the phrase boundaries.
+ */
+function buildBoundaryRegex(terms: ReadonlyArray<string>): RegExp {
+  const escaped = terms.map((term) =>
+    term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+  return new RegExp(`\\b(?:${escaped.join("|")})\\b`, "gi");
+}
+
+const HEDGE_REGEX = buildBoundaryRegex(HEDGE_TERMS);
+const JARGON_REGEX = buildBoundaryRegex(JARGON_TERMS);
+
+/**
+ * Count hedges in `text`. Lowercase, word-boundary, multi-word phrases
+ * supported. F-11: warn at 2, treat 3+ as a strong signal of voice drift.
+ */
+export function countHedges(text: string): number {
+  if (typeof text !== "string" || text.trim() === "") return 0;
+  const matches = text.toLowerCase().match(HEDGE_REGEX);
+  return matches === null ? 0 : matches.length;
+}
+
+/**
+ * Find astrology-jargon occurrences whose first use is NOT paired with a
+ * plain-English gloss. Heuristic: a "gloss" is detected when, within ±60
+ * characters of the jargon's first use, any of the following appears:
+ *   - an em-dash followed by lowercase prose ("— a friction angle…")
+ *   - a parenthetical ("(a 90° tension…)")
+ *   - the words "meaning", "i.e.", "that is", "which is", or "(the"
+ *
+ * Returns the list of jargon terms whose first use looked un-glossed.
+ * F-12 spec: log only, do not block — this is a heuristic and will have
+ * false positives. Use the log to refine.
+ */
+export function findUnglossedJargon(text: string): ReadonlyArray<string> {
+  if (typeof text !== "string" || text.trim() === "") return [];
+  const lower = text.toLowerCase();
+
+  const glossSignals = [
+    /—\s+(?:a |the |an )?[a-z]/, // em-dash followed by lowercase
+    /\([^)]*\b(?:angle|tension|alignment|relationship|placement|window|cycle|degree|orb|crossing|moment|period|configuration|pattern)\b[^)]*\)/,
+    /\b(?:meaning|i\.e\.|that is|which is|in plain terms|put plainly)\b/,
+  ];
+
+  const seen = new Set<string>();
+  const unglossed: string[] = [];
+
+  // Find first occurrence of each jargon term (case-insensitive).
+  for (const term of JARGON_TERMS) {
+    const termRegex = new RegExp(`\\b${term}\\b`, "i");
+    const match = termRegex.exec(text);
+    if (match === null) continue;
+    if (seen.has(term)) continue;
+    seen.add(term);
+
+    const idx = match.index;
+    const windowStart = Math.max(0, idx - 60);
+    const windowEnd = Math.min(text.length, idx + match[0].length + 60);
+    const window = lower.slice(windowStart, windowEnd);
+
+    const hasGloss = glossSignals.some((signal) => signal.test(window));
+    if (!hasGloss) {
+      unglossed.push(term);
+    }
+  }
+
+  return unglossed;
+}
+
+/**
  * Lightweight regex classifier for irreversible life-decision framings.
  * Used for telemetry + potential deterministic reinforcement. The prompt
  * rules above also instruct the LLM to detect this from question text

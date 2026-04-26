@@ -20,6 +20,7 @@ import {
   CULT_PHRASE_RULES,
   FINANCIAL_SAFETY_RULES,
   LIFE_DECISION_COACH_RULES,
+  VOICE_DISCIPLINE_RULES,
   isLifeStakesQuestion,
 } from "@/domain/safety/prompt-rules";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
@@ -92,6 +93,7 @@ function buildDecisionSignalsSystemPrompt(input: DailyBriefingInput) {
     "No generic coaching or generic horoscope phrasing.",
     ...FINANCIAL_SAFETY_RULES,
     ...CULT_PHRASE_RULES,
+    ...VOICE_DISCIPLINE_RULES,
     `Tone preference reference: ${input.tone_preference}.`,
   ].join("\n\n");
 }
@@ -157,6 +159,7 @@ function buildDecisionGuidanceSystemPrompt(
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
     ...FINANCIAL_SAFETY_RULES,
     ...CULT_PHRASE_RULES,
+    ...VOICE_DISCIPLINE_RULES,
     ...LIFE_DECISION_COACH_RULES,
     ...lifeStakesReinforcement,
     "Reject generic phrasing such as 'today is a good day' or 'you may feel'.",

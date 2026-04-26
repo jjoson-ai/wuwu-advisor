@@ -26,6 +26,9 @@ import {
   CULT_PHRASE_RULES,
   FINANCIAL_SAFETY_RULES,
   LIFE_DECISION_COACH_RULES,
+  VOICE_DISCIPLINE_RULES,
+  countHedges,
+  findUnglossedJargon,
   isLifeStakesQuestion,
 } from "../domain/safety/prompt-rules";
 
@@ -326,6 +329,129 @@ function runSanityChecks(): number {
   return failures;
 }
 
+// ─── F-11 / F-12 — voice discipline (hedge cap + jargon pairing) ─────────────
+
+type VoiceCase = {
+  label: string;
+  text: string;
+  expectHedges?: number;
+  expectUnglossedJargon?: ReadonlyArray<string>;
+};
+
+const VOICE_CASES: ReadonlyArray<VoiceCase> = [
+  // Hedge counter — F-11
+  {
+    label: "no hedges",
+    text: "Today's energy points to clarity in conversation. Speak directly when the window opens.",
+    expectHedges: 0,
+  },
+  {
+    label: "single hedge — acceptable",
+    text: "You might find Friday afternoon more productive than morning. Lean in then.",
+    expectHedges: 1,
+  },
+  {
+    label: "two hedges — warn",
+    text: "You might find Friday productive, and there's a chance the evening lands softer.",
+    expectHedges: 2,
+  },
+  {
+    label: "three hedges — block-worthy",
+    text: "You could maybe see this clear up, perhaps by next week, though it's possible the timing slips.",
+    expectHedges: 3,
+  },
+  {
+    label: "multi-word hedge phrase",
+    text: "It's possible that the call comes Tuesday afternoon.",
+    expectHedges: 1,
+  },
+
+  // Jargon pairing — F-12
+  {
+    label: "no jargon",
+    text: "Today's energy is steady. Lean into careful work and shorter conversations.",
+    expectUnglossedJargon: [],
+  },
+  {
+    label: "jargon with em-dash gloss — acceptable",
+    text: "Mercury squaring Saturn — a friction angle that often correlates with communication delays.",
+    expectUnglossedJargon: [],
+  },
+  {
+    label: "jargon with parenthetical gloss — acceptable",
+    text: "A Saturn-Pluto square (a 90° tension that asks for restructuring) is in orb this week.",
+    expectUnglossedJargon: [],
+  },
+  {
+    label: "un-glossed transit at end",
+    text: "Things lift after Saturday's transit completes.",
+    expectUnglossedJargon: ["transit"],
+  },
+  {
+    label: "un-glossed retrograde",
+    text: "The retrograde shifts the conversation pace for the next two weeks.",
+    expectUnglossedJargon: ["retrograde"],
+  },
+];
+
+function runVoiceCases(): number {
+  console.log("\n== F-11 / F-12 voice discipline ==");
+  let failures = 0;
+  for (const c of VOICE_CASES) {
+    if (c.expectHedges !== undefined) {
+      const got = countHedges(c.text);
+      if (got === c.expectHedges) {
+        console.log(`  PASS  ${c.label}: countHedges = ${got}`);
+      } else {
+        console.log(
+          `  FAIL  ${c.label}: countHedges = ${got}, expected ${c.expectHedges}`,
+        );
+        failures += 1;
+      }
+    }
+    if (c.expectUnglossedJargon !== undefined) {
+      const got = findUnglossedJargon(c.text);
+      const want = c.expectUnglossedJargon;
+      const same =
+        got.length === want.length &&
+        got.every((term, i) => term === want[i]);
+      if (same) {
+        console.log(
+          `  PASS  ${c.label}: findUnglossedJargon = [${got.join(", ")}]`,
+        );
+      } else {
+        console.log(
+          `  FAIL  ${c.label}: findUnglossedJargon = [${got.join(", ")}], expected [${want.join(", ")}]`,
+        );
+        failures += 1;
+      }
+    }
+  }
+
+  // Sanity: voice-discipline rule set is wired
+  if (VOICE_DISCIPLINE_RULES.length === 0) {
+    console.log("  FAIL  VOICE_DISCIPLINE_RULES is empty");
+    failures += 1;
+  } else {
+    console.log(
+      `  PASS  VOICE_DISCIPLINE_RULES has ${VOICE_DISCIPLINE_RULES.length} rules`,
+    );
+  }
+  const voiceJoined = VOICE_DISCIPLINE_RULES.join(" ").toLowerCase();
+  for (const phrase of ["one hedge", "plain-english gloss", "first use"]) {
+    if (voiceJoined.includes(phrase)) {
+      console.log(`  PASS  VOICE_DISCIPLINE_RULES mentions "${phrase}"`);
+    } else {
+      console.log(
+        `  FAIL  VOICE_DISCIPLINE_RULES does not mention "${phrase}" — regression risk`,
+      );
+      failures += 1;
+    }
+  }
+
+  return failures;
+}
+
 function main() {
   let total = 0;
   let failures = 0;
@@ -342,6 +468,10 @@ function main() {
   // sanity checks count each phrase as its own assertion
   const sanityFailures = runSanityChecks();
   failures += sanityFailures;
+
+  // F-11 / F-12 voice discipline checks
+  total += VOICE_CASES.length;
+  failures += runVoiceCases();
 
   console.log(
     failures === 0
