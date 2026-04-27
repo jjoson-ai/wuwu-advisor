@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "astrologerondemand",
+  "project_id": "917df85d-ba5b-4a20-9170-2f9408de89b6"
+}
