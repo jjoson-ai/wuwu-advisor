@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 /**
  * CORS posture (audit 1.8, 2025-05):
@@ -60,7 +61,7 @@ const cspDirectives = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   // Supabase REST + realtime, plus the analytics/ads pixels.
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net https://www.facebook.com",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net https://www.facebook.com https://*.sentry.io",
   // We do not embed any third-party iframes into the app.
   "frame-src 'self'",
   // Defense-in-depth alongside X-Frame-Options.
@@ -116,4 +117,16 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+const sentryNextConfig = withSentryConfig(nextConfig, {
+  silent: true,
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  widenClientFileUpload: true,
+  tunnelRoute: "/monitoring",
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: true,
+  },
+  disableLogger: true,
+});
+
+export default sentryNextConfig;
