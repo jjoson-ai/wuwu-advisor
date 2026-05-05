@@ -11,7 +11,7 @@ const FREE_FEATURES = [
   "Daily briefing — Today signals, timing windows, domain guidance",
   "Blueprint overview — summary, core pattern, Chinese zodiac signature",
   "30-day Forecast — phase summary and snapshot",
-  "Ask — 2 questions per day",
+  "Ask — 3 questions per day, 1 big decision per week",
 ];
 
 const PRO_FEATURES = [
