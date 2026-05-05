@@ -14,6 +14,7 @@
     "test:smoke:prod:auth": "playwright test tests/playwright/auth.setup.ts --config=playwright.prod.config.ts --project=setup --headed",
     "test:smoke:prod": "playwright test tests/playwright/prod.smoke.spec.ts --config=playwright.prod.config.ts --project=chromium-smoke --headed",
     "verify:alpha": "tsx --env-file-if-exists=.env.local scripts/verify-alpha-readiness.ts",
+    "verify:model-pricing": "tsx --env-file-if-exists=.env.local scripts/verify-model-pricing.ts",
     "test:ux:capture": "WUWU_AUDIT_RUN_ID=${WUWU_AUDIT_RUN_ID:-$(date +%Y%m%d-%H%M%S)} playwright test tests/playwright/ux-audit.capture.spec.ts --project=chromium-audit --project=iphone-audit --headed"
   },
   "dependencies": {

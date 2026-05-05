@@ -15,9 +15,9 @@ export type RoutedModel = {
   model: string;
 };
 
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
-const SONNET_MODEL = "claude-sonnet-4-6";
-const OPUS_MODEL = "claude-opus-4-7";
+export const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+export const SONNET_MODEL = "claude-sonnet-4-6";
+export const OPUS_MODEL = "claude-opus-4-7";
 
 /**
  * Resolve the model for a generation pass. The optional `feature` param
