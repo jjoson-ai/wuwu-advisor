@@ -136,11 +136,11 @@ export async function POST(request: Request) {
       checkoutUrl: session.url,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to start checkout.";
-
     console.error("[Billing] Failed to create Stripe Checkout session.", error);
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Unable to start checkout." },
+      { status: 500 },
+    );
   }
 }

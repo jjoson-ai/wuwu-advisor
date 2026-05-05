@@ -69,6 +69,11 @@ import { logProductEvent } from "@/lib/product-events.server";
 import { toRoutingEventScores } from "@/lib/routing-events";
 import { logRoutingEvent } from "@/lib/routing-events.server";
 import { isSupportedTimeZone } from "@/lib/timezones";
+import {
+  getDailyPeriodKey,
+  getUsageCount,
+  incrementUsageCount,
+} from "@/lib/server-usage-limits";
 
 function getDateContext(timezone: string) {
   const now = new Date();
@@ -314,6 +319,29 @@ export async function POST(request: Request) {
           record.birthData?.full_birth_name_for_numerology ?? null,
       });
     const accessState = getRequestAccessState(user, request);
+    const todayPeriodKey = getDailyPeriodKey(timezone);
+    if (
+      accessState.accessLevel === "free" &&
+      accessState.dailyUsageLimits.todayRefreshesPerDay !== null
+    ) {
+      const usedCount = await getUsageCount(
+        user.id,
+        todayPeriodKey,
+        "today-refresh",
+      );
+      if (
+        usedCount >= accessState.dailyUsageLimits.todayRefreshesPerDay
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily Today refresh limit reached. Upgrade to Pro for unlimited refreshes.",
+            upgrade_required: true,
+          },
+          { status: 429 },
+        );
+      }
+    }
     const frontierModel = getModelForPass("synthesize");
     const cheapModel = getModelForPass("compose", "today");
 
@@ -737,6 +765,10 @@ export async function POST(request: Request) {
 
         if (saveResult.success === false) {
           throw new Error(saveResult.message);
+        }
+
+        if (accessState.accessLevel === "free") {
+          void incrementUsageCount(user.id, todayPeriodKey, "today-refresh");
         }
 
         const finalModelSelected =

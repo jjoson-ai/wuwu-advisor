@@ -83,6 +83,11 @@ import { runExtractionPipeline } from "@/domain/memory/facts.store";
 import { retrieveRelevantFacts } from "@/domain/memory/facts.retrieve";
 import { formatFactsForPrompt } from "@/domain/memory/facts.inject";
 import { isSupportedTimeZone } from "@/lib/timezones";
+import {
+  getDailyPeriodKey,
+  getUsageCount,
+  incrementUsageCount,
+} from "@/lib/server-usage-limits";
 
 function getDateContext(timezone: string) {
   const now = new Date();
@@ -247,6 +252,29 @@ export async function POST(request: Request) {
     const decisionFeasibility = classifyDecisionFeasibility(question);
     const contextEmphasis = getContextEmphasis(decisionHorizon);
     const accessState = getRequestAccessState(user, request);
+    const askPeriodKey = getDailyPeriodKey(timezone);
+    if (
+      accessState.accessLevel === "free" &&
+      accessState.dailyUsageLimits.askQuestionsPerDay !== null
+    ) {
+      const usedCount = await getUsageCount(
+        user.id,
+        askPeriodKey,
+        "ask",
+      );
+      if (
+        usedCount >= accessState.dailyUsageLimits.askQuestionsPerDay
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily Ask limit reached. Upgrade to Pro for unlimited questions.",
+            upgrade_required: true,
+          },
+          { status: 429 },
+        );
+      }
+    }
     const frontierModel = getModelForPass("synthesize");
     const cheapModel = getModelForPass("compose");
 
@@ -549,6 +577,10 @@ export async function POST(request: Request) {
 
         if (saveResult.success === false) {
           throw new Error(saveResult.message);
+        }
+
+        if (accessState.accessLevel === "free") {
+          void incrementUsageCount(user.id, askPeriodKey, "ask");
         }
 
         const repeatedAskWithin24Hours =

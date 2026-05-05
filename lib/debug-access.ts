@@ -65,7 +65,7 @@ function getCheckoutAccessLevelBridge(
 }
 
 export function isDebugAccessOverrideEnabled() {
-  return process.env.NODE_ENV !== "production";
+  return process.env.DEBUG_ACCESS_ENABLED === "true";
 }
 
 export async function getServerDebugAccessLevelOverride() {

@@ -53,7 +53,7 @@ function extractExternalReferrerHost(
   }
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Ops dashboard — password-only gate, no Supabase session required
@@ -66,7 +66,7 @@ export function middleware(request: NextRequest) {
 
   if (isOpsPath && !isOpsPublic) {
     const cookieValue = request.cookies.get(OPS_AUTH_COOKIE)?.value;
-    if (!isOpsSessionValid(cookieValue)) {
+    if (!(await isOpsSessionValid(cookieValue))) {
       const loginUrl = new URL("/ops/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
