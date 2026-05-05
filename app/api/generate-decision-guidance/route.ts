@@ -258,51 +258,50 @@ export async function POST(request: Request) {
     const decisionFeasibility = classifyDecisionFeasibility(question);
     const contextEmphasis = getContextEmphasis(decisionHorizon);
     const accessState = getRequestAccessState(user, request);
-    const askPeriodKey = getDailyPeriodKey(timezone);
-    if (
-      accessState.accessLevel === "free" &&
-      accessState.dailyUsageLimits.askQuestionsPerDay !== null
-    ) {
-      const gate = await tryIncrementUsageCount(
-        user.id,
-        askPeriodKey,
-        "ask",
-        accessState.dailyUsageLimits.askQuestionsPerDay,
-      );
-      if (gate.wasIncremented === false) {
-        return NextResponse.json(
-          {
-            error:
-              "Daily Ask limit reached. Upgrade to Pro for unlimited questions.",
-            upgrade_required: true,
-          },
-          { status: 429 },
-        );
-      }
-    }
-
-    const bigDecisionLimit = accessState.dailyUsageLimits.askBigDecisionPerWeek;
-    if (
-      accessState.accessLevel === "free" &&
-      bigDecisionLimit !== null &&
-      isLifeStakesQuestion(question)
-    ) {
-      const weeklyPeriodKey = getWeeklyPeriodKey(timezone);
-      const bigDecisionGate = await tryIncrementUsageCount(
-        user.id,
-        weeklyPeriodKey,
-        "big-decision",
-        bigDecisionLimit,
-      );
-      if (bigDecisionGate.wasIncremented === false) {
-        return NextResponse.json(
-          {
-            error:
-              "Weekly big-decision limit reached. Upgrade to Pro for unlimited guidance on major life decisions.",
-            upgrade_required: true,
-          },
-          { status: 429 },
-        );
+    if (accessState.accessLevel === "free") {
+      const isBigDecision = isLifeStakesQuestion(question);
+      if (isBigDecision) {
+        const bigDecisionLimit = accessState.dailyUsageLimits.askBigDecisionPerWeek;
+        if (bigDecisionLimit !== null) {
+          const weeklyPeriodKey = getWeeklyPeriodKey(timezone);
+          const gate = await tryIncrementUsageCount(
+            user.id,
+            weeklyPeriodKey,
+            "big-decision",
+            bigDecisionLimit,
+          );
+          if (gate.wasIncremented === false) {
+            return NextResponse.json(
+              {
+                error:
+                  "Weekly big-decision limit reached. Upgrade to Pro for unlimited guidance on major life decisions.",
+                upgrade_required: true,
+              },
+              { status: 429 },
+            );
+          }
+        }
+      } else {
+        const askLimit = accessState.dailyUsageLimits.askQuestionsPerDay;
+        if (askLimit !== null) {
+          const askPeriodKey = getDailyPeriodKey(timezone);
+          const gate = await tryIncrementUsageCount(
+            user.id,
+            askPeriodKey,
+            "ask",
+            askLimit,
+          );
+          if (gate.wasIncremented === false) {
+            return NextResponse.json(
+              {
+                error:
+                  "Daily Ask limit reached. Upgrade to Pro for unlimited questions.",
+                upgrade_required: true,
+              },
+              { status: 429 },
+            );
+          }
+        }
       }
     }
 

@@ -56,26 +56,17 @@ export function getWeeklyPeriodKey(timezone: string | null | undefined): string 
   }
 
   const date = new Date(localDateString);
-  const jan4 = new Date(date.getFullYear(), 0, 4);
-  const dayOfWeek = jan4.getDay();
-  const startOfWeek1 = new Date(jan4);
-  startOfWeek1.setDate(jan4.getDate() - ((dayOfWeek + 6) % 7) + 1);
-  const diff = date.getTime() - startOfWeek1.getTime();
-  let week = Math.floor(diff / (7 * 86400000)) + 1;
-
-  if (week <= 0) {
-    const prevYear = date.getFullYear() - 1;
-    const prevJan4 = new Date(prevYear, 0, 4);
-    const prevDayOfWeek = prevJan4.getDay();
-    const prevStartOfWeek1 = new Date(prevJan4);
-    prevStartOfWeek1.setDate(prevJan4.getDate() - ((prevDayOfWeek + 6) % 7) + 1);
-    const prevLastDay = new Date(prevYear, 11, 31);
-    const prevDiff = prevLastDay.getTime() - prevStartOfWeek1.getTime();
-    const prevTotalWeeks = Math.floor(prevDiff / (7 * 86400000)) + 1;
-    return `${prevYear}-W${String(prevTotalWeeks).padStart(2, "0")}`;
-  }
-
-  return `${date.getFullYear()}-W${String(week).padStart(2, "0")}`;
+  // Thursday of the same ISO week — its year IS the ISO week-year by definition
+  const thursday = new Date(date);
+  thursday.setDate(date.getDate() - ((date.getDay() + 6) % 7) + 3);
+  const isoYear = thursday.getFullYear();
+  // Jan 4 is always in ISO week 1
+  const jan4 = new Date(isoYear, 0, 4);
+  const jan4Thursday = new Date(jan4);
+  jan4Thursday.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7) + 3);
+  const weekNumber =
+    Math.round((thursday.getTime() - jan4Thursday.getTime()) / (7 * 86400000)) + 1;
+  return `${isoYear}-W${String(weekNumber).padStart(2, "0")}`;
 }
 
 /**
