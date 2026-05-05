@@ -29,6 +29,7 @@ import {
   detectCrisisInput,
   detectCrisisOutput,
 } from "@/domain/safety/crisis-detection";
+import { isLifeStakesQuestion } from "@/domain/safety/prompt-rules";
 import {
   logCareModeShown,
   logCrisisDetected,
@@ -88,6 +89,7 @@ import { formatFactsForPrompt } from "@/domain/memory/facts.inject";
 import { isSupportedTimeZone } from "@/lib/timezones";
 import {
   getDailyPeriodKey,
+  getWeeklyPeriodKey,
   tryIncrementUsageCount,
 } from "@/lib/server-usage-limits";
 
@@ -278,6 +280,32 @@ export async function POST(request: Request) {
         );
       }
     }
+
+    const bigDecisionLimit = accessState.dailyUsageLimits.askBigDecisionPerWeek;
+    if (
+      accessState.accessLevel === "free" &&
+      bigDecisionLimit !== null &&
+      isLifeStakesQuestion(question)
+    ) {
+      const weeklyPeriodKey = getWeeklyPeriodKey(timezone);
+      const bigDecisionGate = await tryIncrementUsageCount(
+        user.id,
+        weeklyPeriodKey,
+        "big-decision",
+        bigDecisionLimit,
+      );
+      if (bigDecisionGate.wasIncremented === false) {
+        return NextResponse.json(
+          {
+            error:
+              "Weekly big-decision limit reached. Upgrade to Pro for unlimited guidance on major life decisions.",
+            upgrade_required: true,
+          },
+          { status: 429 },
+        );
+      }
+    }
+
     const frontierModel = getModelForPass("synthesize");
     const cheapModel = getModelForPass("compose");
 

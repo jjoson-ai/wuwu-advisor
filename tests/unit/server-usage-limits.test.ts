@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { getDailyPeriodKey } from "@/lib/server-usage-limits";
+import { describe, it, expect, vi } from "vitest";
+import { getDailyPeriodKey, getWeeklyPeriodKey } from "@/lib/server-usage-limits";
 
 describe("server-usage-limits", () => {
   describe("getDailyPeriodKey", () => {
@@ -46,6 +46,38 @@ describe("server-usage-limits", () => {
       expect(nyc).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(tokyo).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(utc).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  describe("getWeeklyPeriodKey", () => {
+    it("returns a string matching YYYY-WNN format", () => {
+      const key = getWeeklyPeriodKey("America/New_York");
+      expect(key).toMatch(/^\d{4}-W\d{2}$/);
+    });
+
+    it("returns a consistent value for the same date in the same timezone", () => {
+      const key1 = getWeeklyPeriodKey("Europe/Madrid");
+      const key2 = getWeeklyPeriodKey("Europe/Madrid");
+      expect(key1).toBe(key2);
+    });
+
+    it("falls back to UTC on invalid timezone", () => {
+      const key = getWeeklyPeriodKey("Invalid/Timezone");
+      expect(key).toMatch(/^\d{4}-W\d{2}$/);
+    });
+
+    it("falls back to UTC on null timezone", () => {
+      const key = getWeeklyPeriodKey(null);
+      expect(key).toMatch(/^\d{4}-W\d{2}$/);
+    });
+
+    it("returns a different week key for dates 7+ days apart", () => {
+      vi.useFakeTimers();
+      const key1 = getWeeklyPeriodKey("UTC");
+      vi.setSystemTime(new Date(Date.now() + 8 * 86400000));
+      const key2 = getWeeklyPeriodKey("UTC");
+      vi.useRealTimers();
+      expect(key1).not.toBe(key2);
     });
   });
 

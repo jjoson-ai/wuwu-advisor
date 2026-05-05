@@ -1,6 +1,6 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-export type UsageFeature = "ask" | "today-refresh";
+export type UsageFeature = "ask" | "today-refresh" | "big-decision";
 
 export type TryIncrementResult = {
   newCount: number;
@@ -29,6 +29,53 @@ export function getDailyPeriodKey(timezone: string | null | undefined): string {
       day: "2-digit",
     }).format(new Date());
   }
+}
+
+/**
+ * Format a YYYY-WNN ISO-week period key in the user's local timezone.
+ * Falls back to UTC if the timezone is null/invalid.
+ */
+export function getWeeklyPeriodKey(timezone: string | null | undefined): string {
+  const tz = timezone && timezone.trim() !== "" ? timezone : "UTC";
+
+  let localDateString: string;
+  try {
+    localDateString = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    localDateString = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  }
+
+  const date = new Date(localDateString);
+  const jan4 = new Date(date.getFullYear(), 0, 4);
+  const dayOfWeek = jan4.getDay();
+  const startOfWeek1 = new Date(jan4);
+  startOfWeek1.setDate(jan4.getDate() - ((dayOfWeek + 6) % 7) + 1);
+  const diff = date.getTime() - startOfWeek1.getTime();
+  let week = Math.floor(diff / (7 * 86400000)) + 1;
+
+  if (week <= 0) {
+    const prevYear = date.getFullYear() - 1;
+    const prevJan4 = new Date(prevYear, 0, 4);
+    const prevDayOfWeek = prevJan4.getDay();
+    const prevStartOfWeek1 = new Date(prevJan4);
+    prevStartOfWeek1.setDate(prevJan4.getDate() - ((prevDayOfWeek + 6) % 7) + 1);
+    const prevLastDay = new Date(prevYear, 11, 31);
+    const prevDiff = prevLastDay.getTime() - prevStartOfWeek1.getTime();
+    const prevTotalWeeks = Math.floor(prevDiff / (7 * 86400000)) + 1;
+    return `${prevYear}-W${String(prevTotalWeeks).padStart(2, "0")}`;
+  }
+
+  return `${date.getFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
 /**
