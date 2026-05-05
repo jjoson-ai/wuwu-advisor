@@ -85,8 +85,7 @@ import { formatFactsForPrompt } from "@/domain/memory/facts.inject";
 import { isSupportedTimeZone } from "@/lib/timezones";
 import {
   getDailyPeriodKey,
-  getUsageCount,
-  incrementUsageCount,
+  tryIncrementUsageCount,
 } from "@/lib/server-usage-limits";
 
 function getDateContext(timezone: string) {
@@ -257,14 +256,13 @@ export async function POST(request: Request) {
       accessState.accessLevel === "free" &&
       accessState.dailyUsageLimits.askQuestionsPerDay !== null
     ) {
-      const usedCount = await getUsageCount(
+      const gate = await tryIncrementUsageCount(
         user.id,
         askPeriodKey,
         "ask",
+        accessState.dailyUsageLimits.askQuestionsPerDay,
       );
-      if (
-        usedCount >= accessState.dailyUsageLimits.askQuestionsPerDay
-      ) {
+      if (gate.wasIncremented === false) {
         return NextResponse.json(
           {
             error:
@@ -577,10 +575,6 @@ export async function POST(request: Request) {
 
         if (saveResult.success === false) {
           throw new Error(saveResult.message);
-        }
-
-        if (accessState.accessLevel === "free") {
-          void incrementUsageCount(user.id, askPeriodKey, "ask");
         }
 
         const repeatedAskWithin24Hours =

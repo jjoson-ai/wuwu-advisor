@@ -275,3 +275,37 @@ export async function tryClaimStripeEvent(
     `Failed to claim Stripe webhook event id ${eventId}: ${error.message}`,
   );
 }
+
+/**
+ * Releases a previously-claimed Stripe webhook event by deleting the row
+ * from stripe_webhook_events. Call from the webhook handler when handler
+ * processing throws AFTER tryClaimStripeEvent succeeded — releasing the
+ * claim lets Stripe's retry re-attempt the event with a fresh handler run
+ * instead of being permanently dropped as a "duplicate".
+ *
+ * Best-effort: never throws. If the DELETE fails, we log and continue —
+ * the worst case is a permanent claim that prevents future delivery, which
+ * is observable via Stripe's failed-delivery dashboard and recoverable
+ * manually. Throwing here would mask the original handler error.
+ */
+export async function releaseStripeEventClaim(eventId: string): Promise<void> {
+  try {
+    const supabaseAdmin = getSupabaseAdminClient();
+    const { error } = await supabaseAdmin
+      .from("stripe_webhook_events")
+      .delete()
+      .eq("event_id", eventId);
+
+    if (error !== null) {
+      console.error(
+        "[Billing] Failed to release Stripe webhook event claim after handler error.",
+        { eventId, message: error.message },
+      );
+    }
+  } catch (releaseError) {
+    console.error(
+      "[Billing] releaseStripeEventClaim threw; the claim row remains and may need manual cleanup.",
+      { eventId, releaseError },
+    );
+  }
+}

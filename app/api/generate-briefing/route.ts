@@ -71,8 +71,7 @@ import { logRoutingEvent } from "@/lib/routing-events.server";
 import { isSupportedTimeZone } from "@/lib/timezones";
 import {
   getDailyPeriodKey,
-  getUsageCount,
-  incrementUsageCount,
+  tryIncrementUsageCount,
 } from "@/lib/server-usage-limits";
 
 function getDateContext(timezone: string) {
@@ -324,14 +323,13 @@ export async function POST(request: Request) {
       accessState.accessLevel === "free" &&
       accessState.dailyUsageLimits.todayRefreshesPerDay !== null
     ) {
-      const usedCount = await getUsageCount(
+      const gate = await tryIncrementUsageCount(
         user.id,
         todayPeriodKey,
         "today-refresh",
+        accessState.dailyUsageLimits.todayRefreshesPerDay,
       );
-      if (
-        usedCount >= accessState.dailyUsageLimits.todayRefreshesPerDay
-      ) {
+      if (gate.wasIncremented === false) {
         return NextResponse.json(
           {
             error:
@@ -765,10 +763,6 @@ export async function POST(request: Request) {
 
         if (saveResult.success === false) {
           throw new Error(saveResult.message);
-        }
-
-        if (accessState.accessLevel === "free") {
-          void incrementUsageCount(user.id, todayPeriodKey, "today-refresh");
         }
 
         const finalModelSelected =
