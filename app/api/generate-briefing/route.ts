@@ -242,6 +242,19 @@ async function buildFreeAstroDailyContext(
   };
 }
 
+/**
+ * SSE auth model (audit 1.9, 2025-05):
+ *
+ * Auth is validated once at request start (getRequestAuth). The SSE stream
+ * that follows does NOT re-validate mid-stream. This is acceptable because:
+ *   1. Streams are short-lived (<30s typical, <60s worst case).
+ *   2. Token revocation during an active stream is extremely unlikely.
+ *   3. Re-auth mid-stream would require breaking the SSE protocol or adding
+ *      heartbeat-based auth checks, adding complexity for negligible gain.
+ *
+ * If stream durations grow beyond 60s (e.g. multi-step agentic flows),
+ * revisit with periodic auth re-validation via heartbeat events.
+ */
 export async function POST(request: Request) {
   try {
     const { user, accessToken } = await getRequestAuth(request);

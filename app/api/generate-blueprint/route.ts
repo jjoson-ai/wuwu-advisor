@@ -61,6 +61,8 @@ function getDateContext(timezone: string) {
   return { date, weekday };
 }
 
+// SSE auth: one-time validation at request start, no mid-stream re-auth.
+// See generate-briefing/route.ts audit 1.9 comment for design rationale.
 export async function POST(request: Request) {
   try {
     const { user, accessToken } = await getRequestAuth(request);

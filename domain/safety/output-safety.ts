@@ -259,6 +259,55 @@ function runRegexPrefilter(text: string): OutputSafetyResult | null {
   return null;
 }
 
+// --- Circuit breaker for judge errors (audit 2.5, 2025-05) ----------------
+//
+// Fail-open is correct for transient errors, but sustained judge failure
+// (e.g. prolonged API outage) means ALL outputs bypass safety review. The
+// circuit breaker flips to fail-CLOSED after CIRCUIT_BREAKER_THRESHOLD
+// consecutive failures, blocking outputs until the judge recovers.
+//
+// In-memory — resets on deploy/restart, which is acceptable: a fresh
+// process should re-prove the judge works rather than inheriting a tripped
+// breaker from a previous incarnation.
+
+const CIRCUIT_BREAKER_THRESHOLD = 5;
+
+let consecutiveJudgeFailures = 0;
+
+function recordJudgeSuccess(): void {
+  if (consecutiveJudgeFailures > 0) {
+    console.info(
+      "[output_safety_circuit_breaker] Judge recovered after consecutive failures.",
+      { previousFailures: consecutiveJudgeFailures },
+    );
+  }
+  consecutiveJudgeFailures = 0;
+}
+
+function recordJudgeFailure(): void {
+  consecutiveJudgeFailures += 1;
+  if (consecutiveJudgeFailures === CIRCUIT_BREAKER_THRESHOLD) {
+    console.error(
+      "[output_safety_circuit_breaker] TRIPPED — switching to fail-CLOSED.",
+      { consecutiveFailures: consecutiveJudgeFailures },
+    );
+  } else {
+    console.warn(
+      "[output_safety_circuit_breaker] Judge failure recorded.",
+      { consecutiveFailures: consecutiveJudgeFailures, threshold: CIRCUIT_BREAKER_THRESHOLD },
+    );
+  }
+}
+
+function isCircuitBreakerTripped(): boolean {
+  return consecutiveJudgeFailures >= CIRCUIT_BREAKER_THRESHOLD;
+}
+
+/** Exposed for testing only. */
+export function _resetCircuitBreakerForTest(): void {
+  consecutiveJudgeFailures = 0;
+}
+
 // --- Stage B: Claude Haiku 4.5 safety judge ------------------------------
 
 const SAFETY_JUDGE_MODEL = "claude-haiku-4-5-20251001";
@@ -395,6 +444,22 @@ async function runJudge(
   text: string,
   context?: SafetyClassifyContext,
 ): Promise<OutputSafetyResult> {
+  // Circuit breaker: if the judge has failed CIRCUIT_BREAKER_THRESHOLD times
+  // in a row, block the output rather than letting it through unchecked.
+  if (isCircuitBreakerTripped()) {
+    console.error(
+      "[output_safety_circuit_breaker] Blocking output — judge circuit breaker is tripped.",
+      { consecutiveFailures: consecutiveJudgeFailures },
+    );
+    return {
+      verdict: "unsafe",
+      category: "fatalistic_determinism", // Generic safe category for the block payload
+      severity: "high",
+      rationale: "Safety judge unavailable (circuit breaker tripped) — blocking output as a precaution.",
+      detectionPath: "judge_error",
+    };
+  }
+
   try {
     const result = await generateJsonObjectWithMeta({
       provider: "anthropic",
@@ -424,13 +489,17 @@ async function runJudge(
     }
 
     if (!isValidJudgeOutput(result.parsedJson)) {
-      // Unexpected shape. Fail OPEN — surface via log but do not block.
+      // Unexpected shape — counts as a failure for circuit-breaker purposes.
+      recordJudgeFailure();
       console.warn(
         "[output_safety_judge_invalid_shape]",
         JSON.stringify({ raw: result.parsedJson }),
       );
       return SAFE_RESULT;
     }
+
+    // Success — reset the circuit breaker.
+    recordJudgeSuccess();
 
     return {
       verdict: result.parsedJson.verdict,
@@ -440,9 +509,13 @@ async function runJudge(
       detectionPath: "llm_judge",
     };
   } catch (error) {
+    // Record failure for circuit breaker.
+    recordJudgeFailure();
+
     // Fail OPEN on judge error — a Haiku outage must not DoS generation. The
     // regex prefilter still catches egregious cases; the product_event log
-    // surfaces the error rate for ops.
+    // surfaces the error rate for ops. After CIRCUIT_BREAKER_THRESHOLD
+    // consecutive failures, the next call will fail-CLOSED (see above).
     console.error(
       "[output_safety_judge_failed]",
       error instanceof Error ? error.message : String(error),

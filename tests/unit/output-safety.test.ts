@@ -166,6 +166,115 @@ describe("output-safety (regex prefilter)", () => {
     });
   });
 
+  // --- Cult-phrase false-positive QA (audit 2.6, 2025-05) ---
+  // Verifies that legitimate astrology vocabulary does NOT trigger the
+  // cult-phrase regex rules. These are the edge cases most likely to
+  // produce false positives.
+  describe("cult-phrase regex: false-positive edge cases", () => {
+    let classifyOutputSafety: typeof import("@/domain/safety/output-safety").classifyOutputSafety;
+
+    beforeEach(async () => {
+      const mod = await import("@/domain/safety/output-safety");
+      classifyOutputSafety = mod.classifyOutputSafety;
+      const { generateJsonObjectWithMeta } = await import("@/lib/llm");
+      vi.mocked(generateJsonObjectWithMeta).mockResolvedValue({
+        parsedJson: { verdict: "safe", category: null, severity: "low", rationale: "Fine" },
+        usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+        estimatedCostUsd: 0.001,
+        costIsEstimated: true,
+        duration_ms: 100,
+      });
+    });
+
+    it("does NOT flag 'destination' (not 'destiny')", async () => {
+      const result = await classifyOutputSafety(
+        "This transit points toward your next destination in life.",
+      );
+      expect(result.verdict).toBe("safe");
+    });
+
+    it("does NOT flag 'fateful' (not 'fate')", async () => {
+      const result = await classifyOutputSafety(
+        "A fateful encounter may reshape your perspective.",
+      );
+      // 'fateful' does not match \bfat(?:e|ed)\b — the 'ful' suffix
+      // prevents the word boundary from matching after 'fate'.
+      expect(result.verdict).toBe("safe");
+    });
+
+    it("does NOT flag 'fatal' or 'fatigue'", async () => {
+      const r1 = await classifyOutputSafety(
+        "Avoid fatal assumptions about what others intend.",
+      );
+      expect(r1.verdict).toBe("safe");
+
+      const r2 = await classifyOutputSafety(
+        "You may notice fatigue building toward the end of the week.",
+      );
+      expect(r2.verdict).toBe("safe");
+    });
+
+    it("does NOT flag standard transit descriptions", async () => {
+      const result = await classifyOutputSafety(
+        "Mercury squaring Saturn this week often correlates with communication delays. Mars in your 10th house suggests high career energy.",
+      );
+      expect(result.verdict).toBe("safe");
+    });
+
+    it("does NOT flag reflection-framed pattern language", async () => {
+      const result = await classifyOutputSafety(
+        "This pattern may repeat until you notice it. Sit with the question: what would you regret more in five years?",
+      );
+      expect(result.verdict).toBe("safe");
+    });
+
+    it("does NOT flag 'cosmic energy' or 'cosmic pattern'", async () => {
+      const result = await classifyOutputSafety(
+        "The cosmic energy this week favors introspection. Notice the cosmic pattern between your 7th and 10th houses.",
+      );
+      expect(result.verdict).toBe("safe");
+    });
+
+    it("does NOT flag 'star sign' or 'the stars suggest'", async () => {
+      const result = await classifyOutputSafety(
+        "Your star sign's ruling planet enters Capricorn. The stars suggest a period of reflection.",
+      );
+      expect(result.verdict).toBe("safe");
+    });
+
+    it("does NOT flag 'universal theme' or 'universal pattern'", async () => {
+      const result = await classifyOutputSafety(
+        "This is a universal theme in Saturn returns — the tension between structure and freedom.",
+      );
+      expect(result.verdict).toBe("safe");
+    });
+
+    // Intentional true positives — these SHOULD be caught
+    it("DOES flag 'destiny' in astrology context", async () => {
+      const result = await classifyOutputSafety(
+        "Your chart reveals your true destiny.",
+      );
+      expect(result.verdict).toBe("unsafe");
+      expect(result.category).toBe("fatalistic_determinism");
+    });
+
+    it("DOES flag 'fate' in astrology context", async () => {
+      const result = await classifyOutputSafety(
+        "Accept your fate — Saturn demands it.",
+      );
+      expect(result.verdict).toBe("unsafe");
+      expect(result.category).toBe("fatalistic_determinism");
+    });
+
+    it("DOES flag 'you were born to' even in soft framing", async () => {
+      const result = await classifyOutputSafety(
+        "With Sun in Leo, you were born to lead.",
+      );
+      expect(result.verdict).toBe("unsafe");
+      expect(result.category).toBe("fatalistic_determinism");
+    });
+  });
+
   describe("buildOutputSafetyBlockPayload", () => {
     it("produces safety_block payload for fatalistic_determinism", () => {
       const payload = buildOutputSafetyBlockPayload("fatalistic_determinism");
