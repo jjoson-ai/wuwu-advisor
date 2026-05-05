@@ -100,7 +100,7 @@ describe("sendEmail", () => {
     expect(mockResendSend).toHaveBeenCalledTimes(1);
   });
 
-  it("duplicate idempotency key: second call returns duplicate, Resend NOT called again", async () => {
+  it("duplicate idempotency key (PG SQLSTATE 23505): returns duplicate, Resend NOT called", async () => {
     mockResendSend.mockResolvedValue({
       data: { id: "msg-123" },
       error: null,
@@ -108,7 +108,14 @@ describe("sendEmail", () => {
 
     const result1 = await sendEmail(baseInput);
 
-    mockSingleFn.mockReturnValue({ data: null });
+    // Simulate Postgres unique-constraint violation surfaced via PostgREST.
+    mockSingleFn.mockReturnValue({
+      data: null,
+      error: {
+        code: "23505",
+        message: "duplicate key value violates unique constraint",
+      },
+    });
 
     const result2 = await sendEmail({
       ...baseInput,
@@ -126,6 +133,28 @@ describe("sendEmail", () => {
       status: "duplicate",
     });
     expect(mockResendSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("non-23505 insert error: returns { ok: false, status: 'failed' }, Resend NOT called", async () => {
+    // Simulate a non-duplicate DB error (e.g. RLS rejection, FK violation,
+    // transient connection error). Must surface as failed for ops attention,
+    // NOT silently as "duplicate".
+    mockSingleFn.mockReturnValue({
+      data: null,
+      error: {
+        code: "42501",
+        message: "permission denied for relation email_send_log",
+      },
+    });
+
+    const result = await sendEmail(baseInput);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe("failed");
+      expect(result.reason).toContain("permission denied");
+    }
+    expect(mockResendSend).not.toHaveBeenCalled();
   });
 
   it("suppressed: returns suppressed and Resend NOT called", async () => {
