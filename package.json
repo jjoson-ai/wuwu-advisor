@@ -10,6 +10,8 @@
     "bakeoff:run": "tsx --env-file-if-exists=.env.local scripts/bakeoff/run.ts",
     "bakeoff:report": "tsx --env-file-if-exists=.env.local scripts/bakeoff/report.ts",
     "test:smoke:auth": "playwright test tests/playwright/auth.setup.ts --project=setup --headed",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "test:smoke:checkout": "playwright test tests/playwright/checkout.smoke.spec.ts --project=chromium-smoke --headed",
     "test:smoke:prod:auth": "playwright test tests/playwright/auth.setup.ts --config=playwright.prod.config.ts --project=setup --headed",
     "test:smoke:prod": "playwright test tests/playwright/prod.smoke.spec.ts --config=playwright.prod.config.ts --project=chromium-smoke --headed",
@@ -33,7 +35,9 @@
     "@types/node": "^22.13.14",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
+    "@vitest/ui": "^4.1.5",
     "tsx": "^4.21.0",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.5"
   }
 }
