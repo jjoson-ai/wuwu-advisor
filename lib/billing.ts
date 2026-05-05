@@ -1,9 +1,50 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { User } from "@supabase/supabase-js";
 
 import { getUserAccessLevel } from "@/lib/access";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const CHECKOUT_ACCESS_COOKIE = "wuwu_checkout_access_level";
+
+const CHECKOUT_ACCESS_HMAC_MESSAGE = "checkout_pro_v1";
+
+function getCheckoutAccessHmacSecret(): string {
+  const secret = process.env.OPS_SECRET;
+  if (!secret) {
+    throw new Error(
+      "OPS_SECRET is not configured. It is required for signing the checkout access cookie.",
+    );
+  }
+  return secret;
+}
+
+export function getCheckoutAccessProCookieValue(): string {
+  const hmac = createHmac("sha256", getCheckoutAccessHmacSecret());
+  hmac.update(CHECKOUT_ACCESS_HMAC_MESSAGE);
+  return hmac.digest("hex");
+}
+
+export function verifyCheckoutAccessCookie(
+  cookieValue: string | null | undefined,
+): "pro" | null {
+  if (cookieValue == null || cookieValue.trim() === "") {
+    return null;
+  }
+  let actual: Buffer;
+  try {
+    actual = Buffer.from(cookieValue.trim(), "hex");
+  } catch {
+    return null;
+  }
+  const expected = Buffer.from(getCheckoutAccessProCookieValue(), "hex");
+  if (actual.length !== expected.length) {
+    return null;
+  }
+  if (!timingSafeEqual(actual, expected)) {
+    return null;
+  }
+  return "pro";
+}
 
 export function getStripeProPriceId() {
   const priceId = process.env.STRIPE_PRO_PRICE_ID;

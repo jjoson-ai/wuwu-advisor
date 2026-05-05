@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { getRequestAuth } from "@/lib/auth";
-import { CHECKOUT_ACCESS_COOKIE, grantProAccessToUser } from "@/lib/billing";
+import {
+  CHECKOUT_ACCESS_COOKIE,
+  getCheckoutAccessProCookieValue,
+  grantProAccessToUser,
+} from "@/lib/billing";
 import { logProductEvent } from "@/lib/product-events.server";
 import {
   appendQueryParam,
@@ -158,7 +162,7 @@ export async function GET(request: Request) {
     const response = NextResponse.redirect(
       new URL(returnPath, getAppOrigin(request)),
     );
-    response.cookies.set(CHECKOUT_ACCESS_COOKIE, "pro", {
+    response.cookies.set(CHECKOUT_ACCESS_COOKIE, getCheckoutAccessProCookieValue(), {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
