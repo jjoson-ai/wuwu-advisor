@@ -71,6 +71,38 @@ describe("server-usage-limits", () => {
       expect(key).toMatch(/^\d{4}-W\d{2}$/);
     });
 
+    it("handles ISO week-year boundary: 2018-12-31 → 2019-W01", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2018-12-31T12:00:00Z"));
+      const key = getWeeklyPeriodKey("UTC");
+      vi.useRealTimers();
+      expect(key).toBe("2019-W01");
+    });
+
+    it("handles ISO week-year boundary: 2020-01-01 → 2020-W01", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2020-01-01T12:00:00Z"));
+      const key = getWeeklyPeriodKey("UTC");
+      vi.useRealTimers();
+      expect(key).toBe("2020-W01");
+    });
+
+    it("handles ISO week-year boundary: 2021-01-04 → 2021-W01", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2021-01-04T12:00:00Z"));
+      const key = getWeeklyPeriodKey("UTC");
+      vi.useRealTimers();
+      expect(key).toBe("2021-W01");
+    });
+
+    it("handles ISO week-year boundary: 2022-01-03 → 2022-W01", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2022-01-03T12:00:00Z"));
+      const key = getWeeklyPeriodKey("UTC");
+      vi.useRealTimers();
+      expect(key).toBe("2022-W01");
+    });
+
     it("returns a different week key for dates 7+ days apart", () => {
       vi.useFakeTimers();
       const key1 = getWeeklyPeriodKey("UTC");
