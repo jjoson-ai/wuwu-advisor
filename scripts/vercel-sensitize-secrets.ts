@@ -23,8 +23,17 @@
  *   - Lists all env vars on the project
  *   - For each var whose KEY matches the secret-name pattern AND is currently
  *     stored as plain/encrypted (not "sensitive"), PATCHes type → "sensitive"
+ *     and removes "development" from the target list (Vercel disallows
+ *     sensitive vars on the development target — `vercel env pull` needs
+ *     to read them, sensitive vars are write-only).
  *   - Skips NEXT_PUBLIC_* (those are intentionally client-exposed)
  *   - Skips already-sensitive vars (idempotent re-runs)
+ *
+ * Side effect — local dev:
+ *   After this runs, sensitive vars no longer flow through `vercel env pull`.
+ *   Make sure your `.env.local` has the values you need for local dev.
+ *   Best practice: local dev uses test/sandbox keys, not production secrets,
+ *   so this separation is actually a security improvement.
  *
  * After running: refresh the Vercel dashboard. The "Needs Attention" badges
  * should be gone. Your next deploy will pick up the (unchanged) values.
@@ -151,16 +160,31 @@ async function main(): Promise<void> {
 
   for (const env of candidates) {
     try {
+      // Vercel does NOT allow Sensitive vars to target `development` —
+      // sensitive vars are write-only and `vercel env pull` (which powers
+      // local dev) needs to read them. So we drop `development` from the
+      // target and keep production + preview encrypted at rest. Local dev
+      // should be using `.env.local` (git-ignored) anyway, ideally with
+      // test/sandbox keys rather than production secrets.
+      const sensitiveTargets = env.target.filter((t) => t !== "development");
+      const targetChanged = sensitiveTargets.length !== env.target.length;
+
       await vercelFetch(
         `/v10/projects/${projectId}/env/${env.id}`,
         {
           method: "PATCH",
-          body: JSON.stringify({ type: "sensitive" }),
+          body: JSON.stringify({
+            type: "sensitive",
+            target: sensitiveTargets,
+          }),
         },
         token,
         teamId,
       );
-      console.log(`  ✓ ${env.key} → sensitive`);
+      const note = targetChanged
+        ? " (dropped 'development' target — sensitive vars don't support it)"
+        : "";
+      console.log(`  ✓ ${env.key} → sensitive${note}`);
       succeeded += 1;
     } catch (error) {
       console.error(
