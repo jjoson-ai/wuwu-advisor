@@ -59,7 +59,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
     const admin = getSupabaseAdminClient();
 
-    const { data: insertedRow } = await admin
+    const { data: insertedRow, error: insertError } = await admin
       .from("email_send_log")
       .insert({
         idempotency_key: input.idempotencyKey,
@@ -74,8 +74,34 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       .select("id")
       .single();
 
+    // Distinguish a true unique-constraint conflict (idempotent re-send) from
+    // any other DB failure. Postgres SQLSTATE 23505 = unique_violation;
+    // PostgREST surfaces it via `error.code === "23505"`. Anything else
+    // (RLS rejection, FK violation, transient network) MUST surface as
+    // failed — silently treating it as "duplicate" would drop emails.
+    if (insertError != null) {
+      if (insertError.code === "23505") {
+        return { ok: true, messageId: null, status: "duplicate" };
+      }
+      const reason = String(insertError.message ?? insertError).slice(0, 500);
+      console.error("[email-send] log insert failed", {
+        template: input.template,
+        domain: emailDomain,
+        code: insertError.code,
+        reason,
+      });
+      return { ok: false, status: "failed", reason };
+    }
+
     if (insertedRow == null) {
-      return { ok: true, messageId: null, status: "duplicate" };
+      // Defensive: insert succeeded with no error but no row returned. Treat
+      // as failed (not duplicate) to surface for ops attention.
+      const reason = "log insert returned no row and no error";
+      console.error("[email-send]", reason, {
+        template: input.template,
+        domain: emailDomain,
+      });
+      return { ok: false, status: "failed", reason };
     }
 
     try {

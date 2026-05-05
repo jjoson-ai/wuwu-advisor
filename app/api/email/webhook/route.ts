@@ -62,16 +62,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true });
   }
 
-  if (evt.type === "email.bounced") {
-    await suppressEmail(rawEmail, "bounce");
-    console.info("[Email Webhook] Suppressed bounced address.", {
-      type: evt.type,
-    });
-  } else if (evt.type === "email.complained") {
-    await suppressEmail(rawEmail, "complaint");
-    console.info("[Email Webhook] Suppressed complaint address.", {
-      type: evt.type,
-    });
+  // suppressEmail throws on DB failure. We catch and return 503 so Resend
+  // retries (Resend retries non-2xx with exponential backoff). Returning 200
+  // when the suppression write failed would silently drop the
+  // bounce/complaint and let future sends to the problem address through.
+  try {
+    if (evt.type === "email.bounced") {
+      await suppressEmail(rawEmail, "bounce");
+      console.info("[Email Webhook] Suppressed bounced address.", {
+        type: evt.type,
+      });
+    } else if (evt.type === "email.complained") {
+      await suppressEmail(rawEmail, "complaint");
+      console.info("[Email Webhook] Suppressed complaint address.", {
+        type: evt.type,
+      });
+    }
+  } catch (suppressionError) {
+    const reason =
+      suppressionError instanceof Error
+        ? suppressionError.message
+        : String(suppressionError);
+    console.error(
+      "[Email Webhook] Suppression write failed; returning 503 so Resend will retry.",
+      { type: evt.type, reason },
+    );
+    return NextResponse.json(
+      { error: "Suppression write failed; please retry." },
+      { status: 503 },
+    );
   }
 
   return NextResponse.json({ received: true });

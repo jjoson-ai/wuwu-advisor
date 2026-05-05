@@ -188,5 +188,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // /monitoring is the Sentry tunnelRoute (configured in next.config.ts via
+  // withSentryConfig). Tunnel requests must NOT pass through this middleware
+  // — attribution-cookie processing or ops-redirect logic would corrupt or
+  // drop the Sentry event payload. Per Sentry's Next.js docs, exclude the
+  // tunnel endpoint from the middleware matcher explicitly.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|monitoring).*)"],
 };
