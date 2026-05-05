@@ -120,6 +120,15 @@ export async function revokeProAccessToUser(params: {
   return updateResult.data.user as User;
 }
 
+/**
+ * Maximum number of pages findUserByStripeBillingIdentity will iterate
+ * before giving up. 10 pages × 200 users = 2000 users max scanned per
+ * lookup. Beyond this we log a warning and return null — better to ask
+ * Stripe to retry the webhook (which will hit a fresh lookup) than to
+ * scan unbounded.
+ */
+const MAX_LIST_USERS_PAGES = 10;
+
 export async function findUserByStripeBillingIdentity(params: {
   userId?: string | null;
   stripeCustomerId?: string | null;
@@ -168,6 +177,19 @@ export async function findUserByStripeBillingIdentity(params: {
     }
 
     if (users.length < perPage) {
+      return null;
+    }
+
+    if (page >= MAX_LIST_USERS_PAGES) {
+      console.warn(
+        "[Billing] findUserByStripeBillingIdentity hit MAX_LIST_USERS_PAGES cap without finding a match.",
+        {
+          stripeCustomerId,
+          stripeSubscriptionId,
+          pagesScanned: page,
+          maxPages: MAX_LIST_USERS_PAGES,
+        },
+      );
       return null;
     }
 
