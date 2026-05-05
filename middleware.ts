@@ -53,7 +53,7 @@ function extractExternalReferrerHost(
   }
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Ops dashboard — password-only gate, no Supabase session required
@@ -66,7 +66,7 @@ export function middleware(request: NextRequest) {
 
   if (isOpsPath && !isOpsPublic) {
     const cookieValue = request.cookies.get(OPS_AUTH_COOKIE)?.value;
-    if (!isOpsSessionValid(cookieValue)) {
+    if (!(await isOpsSessionValid(cookieValue))) {
       const loginUrl = new URL("/ops/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
@@ -86,7 +86,7 @@ export function middleware(request: NextRequest) {
   }
 
   const currentValue = request.cookies.get(ATTRIBUTION_COOKIE)?.value;
-  const existing = parseAttributionCookie(currentValue) ?? EMPTY_ATTRIBUTION;
+  const existing = (await parseAttributionCookie(currentValue)) ?? EMPTY_ATTRIBUTION;
 
   // Extract inbound touch from this request. First-touch semantics: each
   // field only sets if the existing cookie has null for it. So a user who
@@ -158,7 +158,7 @@ export function middleware(request: NextRequest) {
       console.info("[paid_media] captured_attribution", nextAttribution);
     }
 
-    response.cookies.set(ATTRIBUTION_COOKIE, serializeAttributionCookie(nextAttribution), {
+    response.cookies.set(ATTRIBUTION_COOKIE, await serializeAttributionCookie(nextAttribution), {
       path: "/",
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",

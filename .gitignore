@@ -36,3 +36,8 @@ audit-artifacts/
 bakeoff/outputs/
 bakeoff/judgments/
 bakeoff/reports/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

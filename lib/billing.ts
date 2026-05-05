@@ -1,9 +1,50 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { User } from "@supabase/supabase-js";
 
 import { getUserAccessLevel } from "@/lib/access";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const CHECKOUT_ACCESS_COOKIE = "wuwu_checkout_access_level";
+
+const CHECKOUT_ACCESS_HMAC_MESSAGE = "checkout_pro_v1";
+
+function getCheckoutAccessHmacSecret(): string {
+  const secret = process.env.OPS_SECRET;
+  if (!secret) {
+    throw new Error(
+      "OPS_SECRET is not configured. It is required for signing the checkout access cookie.",
+    );
+  }
+  return secret;
+}
+
+export function getCheckoutAccessProCookieValue(): string {
+  const hmac = createHmac("sha256", getCheckoutAccessHmacSecret());
+  hmac.update(CHECKOUT_ACCESS_HMAC_MESSAGE);
+  return hmac.digest("hex");
+}
+
+export function verifyCheckoutAccessCookie(
+  cookieValue: string | null | undefined,
+): "pro" | null {
+  if (cookieValue == null || cookieValue.trim() === "") {
+    return null;
+  }
+  let actual: Buffer;
+  try {
+    actual = Buffer.from(cookieValue.trim(), "hex");
+  } catch {
+    return null;
+  }
+  const expected = Buffer.from(getCheckoutAccessProCookieValue(), "hex");
+  if (actual.length !== expected.length) {
+    return null;
+  }
+  if (!timingSafeEqual(actual, expected)) {
+    return null;
+  }
+  return "pro";
+}
 
 export function getStripeProPriceId() {
   const priceId = process.env.STRIPE_PRO_PRICE_ID;
@@ -120,6 +161,15 @@ export async function revokeProAccessToUser(params: {
   return updateResult.data.user as User;
 }
 
+/**
+ * Maximum number of pages findUserByStripeBillingIdentity will iterate
+ * before giving up. 10 pages × 200 users = 2000 users max scanned per
+ * lookup. Beyond this we log a warning and return null — better to ask
+ * Stripe to retry the webhook (which will hit a fresh lookup) than to
+ * scan unbounded.
+ */
+const MAX_LIST_USERS_PAGES = 10;
+
 export async function findUserByStripeBillingIdentity(params: {
   userId?: string | null;
   stripeCustomerId?: string | null;
@@ -171,6 +221,91 @@ export async function findUserByStripeBillingIdentity(params: {
       return null;
     }
 
+    if (page >= MAX_LIST_USERS_PAGES) {
+      console.warn(
+        "[Billing] findUserByStripeBillingIdentity hit MAX_LIST_USERS_PAGES cap without finding a match.",
+        {
+          stripeCustomerId,
+          stripeSubscriptionId,
+          pagesScanned: page,
+          maxPages: MAX_LIST_USERS_PAGES,
+        },
+      );
+      return null;
+    }
+
     page += 1;
+  }
+}
+
+/**
+ * Attempts to claim a Stripe webhook event_id by inserting it into
+ * stripe_webhook_events. Returns true if the insert succeeded (caller owns
+ * this delivery and should run handler logic). Returns false if the row
+ * already existed (duplicate retry — caller should return 200 without doing
+ * any work).
+ *
+ * On any non-duplicate DB error, throws — the caller should return 500 so
+ * Stripe will retry the event after the DB issue is resolved.
+ *
+ * Postgres unique-violation code is "23505".
+ */
+export async function tryClaimStripeEvent(
+  eventId: string,
+  eventType: string,
+): Promise<boolean> {
+  const supabaseAdmin = getSupabaseAdminClient();
+  const { error } = await supabaseAdmin
+    .from("stripe_webhook_events")
+    .insert({ event_id: eventId, event_type: eventType });
+
+  if (error === null) {
+    return true;
+  }
+
+  if ((error as { code?: string }).code === "23505") {
+    console.info(
+      "[Billing] Stripe webhook event already processed; skipping idempotently.",
+      { eventId, eventType },
+    );
+    return false;
+  }
+
+  throw new Error(
+    `Failed to claim Stripe webhook event id ${eventId}: ${error.message}`,
+  );
+}
+
+/**
+ * Releases a previously-claimed Stripe webhook event by deleting the row
+ * from stripe_webhook_events. Call from the webhook handler when handler
+ * processing throws AFTER tryClaimStripeEvent succeeded — releasing the
+ * claim lets Stripe's retry re-attempt the event with a fresh handler run
+ * instead of being permanently dropped as a "duplicate".
+ *
+ * Best-effort: never throws. If the DELETE fails, we log and continue —
+ * the worst case is a permanent claim that prevents future delivery, which
+ * is observable via Stripe's failed-delivery dashboard and recoverable
+ * manually. Throwing here would mask the original handler error.
+ */
+export async function releaseStripeEventClaim(eventId: string): Promise<void> {
+  try {
+    const supabaseAdmin = getSupabaseAdminClient();
+    const { error } = await supabaseAdmin
+      .from("stripe_webhook_events")
+      .delete()
+      .eq("event_id", eventId);
+
+    if (error !== null) {
+      console.error(
+        "[Billing] Failed to release Stripe webhook event claim after handler error.",
+        { eventId, message: error.message },
+      );
+    }
+  } catch (releaseError) {
+    console.error(
+      "[Billing] releaseStripeEventClaim threw; the claim row remains and may need manual cleanup.",
+      { eventId, releaseError },
+    );
   }
 }

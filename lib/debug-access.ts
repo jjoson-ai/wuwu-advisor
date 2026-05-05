@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-import { CHECKOUT_ACCESS_COOKIE } from "@/lib/billing";
+import { CHECKOUT_ACCESS_COOKIE, verifyCheckoutAccessCookie } from "@/lib/billing";
 import {
   compareAccessLevels,
   getResolvedUserAccessState,
@@ -65,7 +65,7 @@ function getCheckoutAccessLevelBridge(
 }
 
 export function isDebugAccessOverrideEnabled() {
-  return process.env.NODE_ENV !== "production";
+  return process.env.DEBUG_ACCESS_ENABLED === "true";
 }
 
 export async function getServerDebugAccessLevelOverride() {
@@ -109,7 +109,7 @@ export async function getServerAccessState(user: AccessUser) {
   const cookieStore = await cookies();
   const checkoutBridgeAccessLevel = getCheckoutAccessLevelBridge(
     user,
-    parseAccessLevelOverride(cookieStore.get(CHECKOUT_ACCESS_COOKIE)?.value),
+    verifyCheckoutAccessCookie(cookieStore.get(CHECKOUT_ACCESS_COOKIE)?.value),
   );
 
   return getResolvedUserAccessState(user, checkoutBridgeAccessLevel);
@@ -124,7 +124,7 @@ export function getRequestAccessState(user: AccessUser, request: Request) {
 
   const checkoutBridgeAccessLevel = getCheckoutAccessLevelBridge(
     user,
-    parseAccessLevelOverride(
+    verifyCheckoutAccessCookie(
       getCookieValue(request.headers.get("cookie"), CHECKOUT_ACCESS_COOKIE),
     ),
   );

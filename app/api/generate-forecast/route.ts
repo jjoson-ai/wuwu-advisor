@@ -49,7 +49,10 @@ import { getRequestAccessState } from "@/lib/debug-access";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
 import { logLlmCost } from "@/lib/cost-events.server";
 import { getModelRoutingDecision } from "@/lib/model-decision";
-import { getModelForPass } from "@/lib/model-routing";
+import {
+  getModelForPass,
+  selectModelForGeneration,
+} from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
 import { getRequestPlatform } from "@/lib/product-events";
 import { logProductEvent } from "@/lib/product-events.server";
@@ -83,6 +86,8 @@ function sumEstimatedCosts(values: Array<number | null | undefined>) {
   return Number(presentValues.reduce((sum, value) => sum + value, 0).toFixed(6));
 }
 
+// SSE auth: one-time validation at request start, no mid-stream re-auth.
+// See generate-briefing/route.ts audit 1.9 comment for design rationale.
 export async function POST(request: Request) {
   try {
     const { user, accessToken } = await getRequestAuth(request);
@@ -414,12 +419,15 @@ export async function POST(request: Request) {
         const outputSafety = await classifyOutputSafety(forecastText, safetyCtx);
 
         if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
-          const preSaveFinalModel =
+          const preSaveFinalModel = (
             fallbackReason !== null
-              ? frontierModel.model
-              : routingDecision?.useFrontier === true
-                ? frontierModel.model
-                : cheapModel.model;
+              ? frontierModel
+              : selectModelForGeneration({
+                  feature: "forecast",
+                  routingDecision: routingDecision ?? null,
+                  cheapPass: "compose",
+                })
+          ).model;
           void logOutputSafetyFlagged({
             userId: user.id,
             feature: "forecast",
@@ -457,12 +465,19 @@ export async function POST(request: Request) {
           throw new Error(saveResult.message);
         }
 
-        const finalModelSelected =
+        // Model selection follows the precedence rule centralized in
+        // lib/model-routing.ts:selectModelForGeneration — frontier wins when
+        // routingDecision.useFrontier is true; otherwise the feature-aware
+        // compose model. Don't reimplement the precedence here.
+        const finalModelSelected = (
           fallbackReason !== null
-            ? frontierModel.model
-            : routingDecision?.useFrontier === true
-              ? frontierModel.model
-              : cheapModel.model;
+            ? frontierModel
+            : selectModelForGeneration({
+                feature: "forecast",
+                routingDecision: routingDecision ?? null,
+                cheapPass: "compose",
+              })
+        ).model;
         const generationPath =
           fallbackReason !== null
             ? "full_fallback"

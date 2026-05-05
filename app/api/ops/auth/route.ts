@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import {
-  isOpsSessionValid,
+  getOpsSessionCookieValue,
+  isOpsPasswordCorrect,
   OPS_AUTH_COOKIE,
   OPS_AUTH_COOKIE_MAX_AGE,
 } from "@/lib/ops-auth";
@@ -11,12 +12,12 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const password = formData.get("password");
 
-  if (typeof password === "string" && isOpsSessionValid(password)) {
-    const secret = process.env.OPS_SECRET as string;
+  if (typeof password === "string" && isOpsPasswordCorrect(password)) {
+    const cookieValue = await getOpsSessionCookieValue();
     const response = NextResponse.redirect(new URL("/ops", request.url), {
       status: 303,
     });
-    response.cookies.set(OPS_AUTH_COOKIE, secret, {
+    response.cookies.set(OPS_AUTH_COOKIE, cookieValue, {
       httpOnly: true,
       sameSite: "strict",
       secure: process.env.NODE_ENV === "production",

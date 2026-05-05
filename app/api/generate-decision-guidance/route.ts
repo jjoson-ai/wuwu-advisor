@@ -72,7 +72,10 @@ import { getRequestAccessState } from "@/lib/debug-access";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
 import { logLlmCost } from "@/lib/cost-events.server";
 import { getModelRoutingDecision } from "@/lib/model-decision";
-import { getModelForPass } from "@/lib/model-routing";
+import {
+  getModelForPass,
+  selectModelForGeneration,
+} from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
 import { getRequestPlatform } from "@/lib/product-events";
 import { logProductEvent } from "@/lib/product-events.server";
@@ -83,6 +86,10 @@ import { runExtractionPipeline } from "@/domain/memory/facts.store";
 import { retrieveRelevantFacts } from "@/domain/memory/facts.retrieve";
 import { formatFactsForPrompt } from "@/domain/memory/facts.inject";
 import { isSupportedTimeZone } from "@/lib/timezones";
+import {
+  getDailyPeriodKey,
+  tryIncrementUsageCount,
+} from "@/lib/server-usage-limits";
 
 function getDateContext(timezone: string) {
   const now = new Date();
@@ -114,6 +121,8 @@ function sumEstimatedCosts(values: Array<number | null | undefined>) {
   return Number(presentValues.reduce((sum, value) => sum + value, 0).toFixed(6));
 }
 
+// SSE auth: one-time validation at request start, no mid-stream re-auth.
+// See generate-briefing/route.ts audit 1.9 comment for design rationale.
 export async function POST(request: Request) {
   try {
     const { user, accessToken } = await getRequestAuth(request);
@@ -247,6 +256,28 @@ export async function POST(request: Request) {
     const decisionFeasibility = classifyDecisionFeasibility(question);
     const contextEmphasis = getContextEmphasis(decisionHorizon);
     const accessState = getRequestAccessState(user, request);
+    const askPeriodKey = getDailyPeriodKey(timezone);
+    if (
+      accessState.accessLevel === "free" &&
+      accessState.dailyUsageLimits.askQuestionsPerDay !== null
+    ) {
+      const gate = await tryIncrementUsageCount(
+        user.id,
+        askPeriodKey,
+        "ask",
+        accessState.dailyUsageLimits.askQuestionsPerDay,
+      );
+      if (gate.wasIncremented === false) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily Ask limit reached. Upgrade to Pro for unlimited questions.",
+            upgrade_required: true,
+          },
+          { status: 429 },
+        );
+      }
+    }
     const frontierModel = getModelForPass("synthesize");
     const cheapModel = getModelForPass("compose");
 
@@ -503,11 +534,13 @@ export async function POST(request: Request) {
         if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
           const finalModel = (
             fallbackReason !== null
-              ? frontierModel.model
-              : routingDecision?.useFrontier === true
-                ? frontierModel.model
-                : cheapModel.model
-          );
+              ? frontierModel
+              : selectModelForGeneration({
+                  feature: "ask",
+                  routingDecision: routingDecision ?? null,
+                  cheapPass: "compose",
+                })
+          ).model;
           void logOutputSafetyFlagged({
             userId: user.id,
             feature: "ask",
@@ -559,12 +592,19 @@ export async function POST(request: Request) {
           latestDecisionGuidance !== null &&
           normalizeQuestionForInstrumentation(latestDecisionGuidance.question_text) ===
             normalizeQuestionForInstrumentation(question);
-        const finalModelSelected =
+        // Model selection follows the precedence rule centralized in
+        // lib/model-routing.ts:selectModelForGeneration — frontier wins when
+        // routingDecision.useFrontier is true; otherwise the feature-aware
+        // compose model. Don't reimplement the precedence here.
+        const finalModelSelected = (
           fallbackReason !== null
-            ? frontierModel.model
-            : routingDecision?.useFrontier === true
-              ? frontierModel.model
-              : cheapModel.model;
+            ? frontierModel
+            : selectModelForGeneration({
+                feature: "ask",
+                routingDecision: routingDecision ?? null,
+                cheapPass: "compose",
+              })
+        ).model;
         const generationPath =
           fallbackReason !== null
             ? "full_fallback"

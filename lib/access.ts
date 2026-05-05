@@ -109,10 +109,7 @@ export function getDailyUsageLimits(accessLevel: AccessLevel): DailyUsageLimits 
     return {
       askQuestionsPerDay: 3,
       askBigDecisionPerWeek: 1,
-      // DEBUG: temporarily disable the free-tier Today refresh cap while tuning
-      // upstream free vs paid content packs. Reintroduce the numeric limit here
-      // when the gating experiment is complete.
-      todayRefreshesPerDay: null,
+      todayRefreshesPerDay: 3,
     };
   }
 

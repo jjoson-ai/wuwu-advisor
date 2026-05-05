@@ -95,7 +95,7 @@ function logPaidMediaDebug(message: string, payload?: Record<string, unknown>) {
 async function readAttribution() {
   try {
     const cookieStore = await cookies();
-    return parseAttributionCookie(cookieStore.get(ATTRIBUTION_COOKIE)?.value);
+    return await parseAttributionCookie(cookieStore.get(ATTRIBUTION_COOKIE)?.value);
   } catch {
     // Outside a request context (e.g. background job) — no cookie available.
     return null;

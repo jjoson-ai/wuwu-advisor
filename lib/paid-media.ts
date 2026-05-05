@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ProductEventName } from "@/lib/product-events";
 
 export const ATTRIBUTION_COOKIE = "wuwu_attr_ft";
@@ -31,6 +32,89 @@ export type AttributionClickIds = {
 
 /** Alias — prefer this name at new call sites. */
 export type AttributionSnapshot = AttributionClickIds;
+
+const AttributionClickIdsSchema = z.object({
+  gclid: z.string().nullable(),
+  gbraid: z.string().nullable(),
+  wbraid: z.string().nullable(),
+  fbclid: z.string().nullable(),
+  utm_source: z.string().nullable(),
+  utm_medium: z.string().nullable(),
+  utm_campaign: z.string().nullable(),
+  utm_content: z.string().nullable(),
+  utm_term: z.string().nullable(),
+  landing_path: z.string().nullable(),
+  referrer_host: z.string().nullable(),
+  captured_at: z.string().nullable(),
+});
+
+const ATTRIBUTION_HMAC_MESSAGE_PREFIX = "wuwu_attr_v1:";
+
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
+function getAttributionHmacSecret(): string {
+  const secret = process.env.OPS_SECRET;
+  if (!secret) {
+    throw new Error(
+      "OPS_SECRET is not configured. It is required for signing the attribution cookie.",
+    );
+  }
+  return secret;
+}
+
+async function computeAttributionHmac(payload: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(getAttributionHmacSecret()),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(ATTRIBUTION_HMAC_MESSAGE_PREFIX + payload),
+  );
+  const bytes = new Uint8Array(signature);
+  let hex = "";
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, "0");
+  }
+  return hex;
+}
+
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeBase64Url(value: string): string | null {
+  try {
+    const padded =
+      value.replace(/-/g, "+").replace(/_/g, "/") +
+      "=".repeat((4 - (value.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
 
 export const EMPTY_ATTRIBUTION: AttributionClickIds = {
   gclid: null,
@@ -198,37 +282,52 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-export function parseAttributionCookie(
+export async function parseAttributionCookie(
   value: string | undefined,
-): AttributionClickIds | null {
+): Promise<AttributionClickIds | null> {
   if (value == null || value === "") {
     return null;
   }
 
-  try {
-    const parsed = JSON.parse(value) as Partial<AttributionClickIds>;
+  const lastDot = value.lastIndexOf(".");
+  if (lastDot < 0 || lastDot === value.length - 1) {
+    return null;
+  }
 
-    return {
-      gclid: asString(parsed.gclid),
-      gbraid: asString(parsed.gbraid),
-      wbraid: asString(parsed.wbraid),
-      fbclid: asString(parsed.fbclid),
-      utm_source: asString(parsed.utm_source),
-      utm_medium: asString(parsed.utm_medium),
-      utm_campaign: asString(parsed.utm_campaign),
-      utm_content: asString(parsed.utm_content),
-      utm_term: asString(parsed.utm_term),
-      landing_path: asString(parsed.landing_path),
-      referrer_host: asString(parsed.referrer_host),
-      captured_at: asString(parsed.captured_at),
-    };
+  const payload = value.slice(0, lastDot);
+  const providedHmac = value.slice(lastDot + 1);
+  const expectedHmac = await computeAttributionHmac(payload);
+
+  if (!timingSafeEqualHex(providedHmac, expectedHmac)) {
+    return null;
+  }
+
+  const decoded = decodeBase64Url(payload);
+  if (decoded == null) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decoded);
   } catch {
     return null;
   }
+
+  const validated = AttributionClickIdsSchema.safeParse(parsed);
+  if (validated.success === false) {
+    return null;
+  }
+
+  return validated.data;
 }
 
-export function serializeAttributionCookie(input: AttributionClickIds) {
-  return JSON.stringify(input);
+export async function serializeAttributionCookie(
+  input: AttributionClickIds,
+): Promise<string> {
+  const payload = encodeBase64Url(JSON.stringify(input));
+  const hmac = await computeAttributionHmac(payload);
+  return payload + "." + hmac;
 }
 
 export function parseGoogleQueueCookie(

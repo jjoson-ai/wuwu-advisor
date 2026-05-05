@@ -46,6 +46,8 @@ import { getRequestPlatform } from "@/lib/product-events";
 const MAX_FOLLOW_UP_TURNS = 10;
 const FREE_FOLLOW_UP_LIMIT = 1;
 
+// SSE auth: one-time validation at request start, no mid-stream re-auth.
+// See generate-briefing/route.ts audit 1.9 comment for design rationale.
 export async function POST(request: Request) {
   try {
     const { user, accessToken } = await getRequestAuth(request);

@@ -4,7 +4,9 @@ import { NextResponse } from "next/server";
 import {
   findUserByStripeBillingIdentity,
   grantProAccessToUser,
+  releaseStripeEventClaim,
   revokeProAccessToUser,
+  tryClaimStripeEvent,
 } from "@/lib/billing";
 import { logProductEvent } from "@/lib/product-events.server";
 import {
@@ -42,7 +44,13 @@ export async function POST(request: Request) {
   });
 
   try {
-    switch (event.type) {
+    const claimed = await tryClaimStripeEvent(event.id, event.type);
+    if (claimed === false) {
+      return NextResponse.json({ received: true, idempotent_skip: true });
+    }
+
+    try {
+      switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object;
         const purchasedUserId =
@@ -188,9 +196,18 @@ export async function POST(request: Request) {
           eventType: event.type,
         });
         break;
-    }
+      }
 
-    return NextResponse.json({ received: true });
+      return NextResponse.json({ received: true });
+    } catch (handlerError) {
+      // Handler ran but threw after the claim row was inserted. Release the
+      // claim so Stripe's retry can re-attempt with a fresh handler run
+      // instead of being silently skipped as a "duplicate". Then re-throw
+      // to the outer catch which returns 500 (Stripe interprets that as
+      // "retry me").
+      await releaseStripeEventClaim(event.id);
+      throw handlerError;
+    }
   } catch (error) {
     console.error("[Billing] Stripe webhook handler failed.", error, {
       eventId: event.id,

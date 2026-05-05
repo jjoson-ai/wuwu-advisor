@@ -18,6 +18,13 @@ import {
   getOnboardingInputFromObject,
   validateOnboardingInput,
 } from "@/lib/validations";
+import {
+  AGE_GATE_COPPA_AGE,
+  AGE_GATE_MINIMUM_AGE,
+  computeAgeInYears,
+  isAtLeastAge,
+} from "@/domain/safety/age-gate";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
   try {
@@ -60,6 +67,50 @@ export async function POST(request: Request) {
 
     if (validation.success === false) {
       return NextResponse.json({ error: validation.message }, { status: 400 });
+    }
+
+    const now = new Date();
+    if (isAtLeastAge(input.birthDate, AGE_GATE_MINIMUM_AGE, now) === false) {
+      const age = computeAgeInYears(input.birthDate, now);
+
+      void logProductEvent({
+        event_name: "age_gate_rejected_onboarding",
+        timestamp: now.toISOString(),
+        user_id: user.id,
+        tier: null,
+        platform: getRequestPlatform(request),
+        feature: null,
+        plan_type: null,
+        upgrade_surface:
+          age !== null && age < AGE_GATE_COPPA_AGE
+            ? "coppa_under_13"
+            : "sb243_under_18",
+        request_id: null,
+        final_model_selected: null,
+        generation_path: null,
+        fallback_triggered: null,
+        request_cost_estimate_usd: null,
+        request_cost_is_estimated: null,
+        is_first_use: null,
+        repeat_within_24h: null,
+      });
+
+      const supabaseAdmin = getSupabaseAdminClient();
+      const deleteResult = await supabaseAdmin.auth.admin.deleteUser(user.id);
+      if (deleteResult.error !== null) {
+        console.error(
+          "[mobile/settings] admin.deleteUser failed for under-age account:",
+          deleteResult.error,
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error: "Onboarding requires age 18 or older. Account removed.",
+          age_gate_rejected: true,
+        },
+        { status: 403 },
+      );
     }
 
     const previousRecord = await getOnboardingRecord(user.id, accessToken);

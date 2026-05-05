@@ -62,13 +62,20 @@ import {
 import { generateJsonObjectWithMeta } from "@/lib/llm";
 import { logCostEvent, logLlmCost } from "@/lib/cost-events.server";
 import { getModelRoutingDecision } from "@/lib/model-decision";
-import { getModelForPass } from "@/lib/model-routing";
+import {
+  getModelForPass,
+  selectModelForGeneration,
+} from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
 import { getRequestPlatform } from "@/lib/product-events";
 import { logProductEvent } from "@/lib/product-events.server";
 import { toRoutingEventScores } from "@/lib/routing-events";
 import { logRoutingEvent } from "@/lib/routing-events.server";
 import { isSupportedTimeZone } from "@/lib/timezones";
+import {
+  getDailyPeriodKey,
+  tryIncrementUsageCount,
+} from "@/lib/server-usage-limits";
 
 function getDateContext(timezone: string) {
   const now = new Date();
@@ -235,6 +242,19 @@ async function buildFreeAstroDailyContext(
   };
 }
 
+/**
+ * SSE auth model (audit 1.9, 2025-05):
+ *
+ * Auth is validated once at request start (getRequestAuth). The SSE stream
+ * that follows does NOT re-validate mid-stream. This is acceptable because:
+ *   1. Streams are short-lived (<30s typical, <60s worst case).
+ *   2. Token revocation during an active stream is extremely unlikely.
+ *   3. Re-auth mid-stream would require breaking the SSE protocol or adding
+ *      heartbeat-based auth checks, adding complexity for negligible gain.
+ *
+ * If stream durations grow beyond 60s (e.g. multi-step agentic flows),
+ * revisit with periodic auth re-validation via heartbeat events.
+ */
 export async function POST(request: Request) {
   try {
     const { user, accessToken } = await getRequestAuth(request);
@@ -314,6 +334,28 @@ export async function POST(request: Request) {
           record.birthData?.full_birth_name_for_numerology ?? null,
       });
     const accessState = getRequestAccessState(user, request);
+    const todayPeriodKey = getDailyPeriodKey(timezone);
+    if (
+      accessState.accessLevel === "free" &&
+      accessState.dailyUsageLimits.todayRefreshesPerDay !== null
+    ) {
+      const gate = await tryIncrementUsageCount(
+        user.id,
+        todayPeriodKey,
+        "today-refresh",
+        accessState.dailyUsageLimits.todayRefreshesPerDay,
+      );
+      if (gate.wasIncremented === false) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily Today refresh limit reached. Upgrade to Pro for unlimited refreshes.",
+            upgrade_required: true,
+          },
+          { status: 429 },
+        );
+      }
+    }
     const frontierModel = getModelForPass("synthesize");
     const cheapModel = getModelForPass("compose", "today");
 
@@ -691,12 +733,15 @@ export async function POST(request: Request) {
         const outputSafety = await classifyOutputSafety(synthesisText, safetyCtx);
 
         if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
-          const preSaveFinalModel =
+          const preSaveFinalModel = (
             fallbackReason !== null
-              ? frontierModel.model
-              : routingDecision?.useFrontier === true
-                ? frontierModel.model
-                : cheapModel.model;
+              ? frontierModel
+              : selectModelForGeneration({
+                  feature: "today",
+                  routingDecision: routingDecision ?? null,
+                  cheapPass: "compose",
+                })
+          ).model;
           void logOutputSafetyFlagged({
             userId: user.id,
             feature: "today",
@@ -739,12 +784,19 @@ export async function POST(request: Request) {
           throw new Error(saveResult.message);
         }
 
-        const finalModelSelected =
+        // Model selection follows the precedence rule centralized in
+        // lib/model-routing.ts:selectModelForGeneration — frontier wins when
+        // routingDecision.useFrontier is true; otherwise the feature-aware
+        // compose model. Don't reimplement the precedence here.
+        const finalModelSelected = (
           fallbackReason !== null
-            ? frontierModel.model
-            : routingDecision?.useFrontier === true
-              ? frontierModel.model
-              : cheapModel.model;
+            ? frontierModel
+            : selectModelForGeneration({
+                feature: "today",
+                routingDecision: routingDecision ?? null,
+                cheapPass: "compose",
+              })
+        ).model;
         const generationPath =
           fallbackReason !== null
             ? "full_fallback"
