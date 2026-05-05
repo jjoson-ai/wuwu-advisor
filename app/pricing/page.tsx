@@ -34,7 +34,7 @@ export default async function PricingPage() {
           {[
             {
               q: "What's included in the free plan?",
-              a: "You get a full daily briefing, a Blueprint overview, a 30-day forecast snapshot, and 2 Ask questions per day. No time limit — free stays free.",
+              a: "You get a full daily briefing, a Blueprint overview, a 30-day forecast snapshot, 3 Ask questions per day, and 1 big-decision question per week. No time limit — free stays free.",
             },
             {
               q: "What does Pro unlock?",
