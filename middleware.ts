@@ -9,6 +9,7 @@ import {
   type AttributionClickIds,
 } from "@/lib/paid-media";
 import { isOpsSessionValid, OPS_AUTH_COOKIE } from "@/lib/ops-auth";
+import { checkAuthRateLimit } from "@/lib/rate-limit";
 
 /** Paths under /ops that don't require an ops session */
 const OPS_PUBLIC_PATHS = ["/ops/login"];
@@ -69,6 +70,22 @@ export async function middleware(request: NextRequest) {
     if (!(await isOpsSessionValid(cookieValue))) {
       const loginUrl = new URL("/ops/login", request.url);
       return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Ops login brute-force protection — must run before the early /api/ return
+  // below. IP resolved from Vercel's x-forwarded-for header.
+  if (pathname === OPS_AUTH_API_PATH && request.method === "POST") {
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      request.headers.get("x-real-ip") ??
+      "unknown";
+    const rl = await checkAuthRateLimit(ip);
+    if (!rl.allowed) {
+      return new NextResponse("Too Many Requests", {
+        status: 429,
+        headers: { "Retry-After": String(rl.retryAfter) },
+      });
     }
   }
 

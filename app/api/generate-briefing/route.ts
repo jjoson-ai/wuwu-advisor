@@ -51,6 +51,7 @@ import {
   logOutputSafetyFlagged,
 } from "@/domain/safety/output-safety-log";
 import { getRequestAuth } from "@/lib/auth";
+import { checkGenerationRateLimit } from "@/lib/rate-limit";
 import { getRequestAccessState } from "@/lib/debug-access";
 import {
   fetchFreeAstroChineseToday,
@@ -263,6 +264,16 @@ export async function POST(request: Request) {
 
     if (user === null) {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    // LLM cost cap — applies to all users (Free + Pro). 30 requests/hour across
+    // all generation routes. Fails-open: if Redis is unreachable, request passes.
+    const genRl = await checkGenerationRateLimit(user.id);
+    if (!genRl.allowed) {
+      return NextResponse.json(
+        { error: "Generation limit reached. Please try again later.", retry_after: genRl.retryAfter },
+        { status: 429, headers: { "Retry-After": String(genRl.retryAfter) } },
+      );
     }
 
     const record = await getOnboardingRecord(user.id, accessToken);
