@@ -5,6 +5,7 @@ import {
   findUserByStripeBillingIdentity,
   grantProAccessToUser,
   revokeProAccessToUser,
+  tryClaimStripeEvent,
 } from "@/lib/billing";
 import { logProductEvent } from "@/lib/product-events.server";
 import {
@@ -42,6 +43,11 @@ export async function POST(request: Request) {
   });
 
   try {
+    const claimed = await tryClaimStripeEvent(event.id, event.type);
+    if (claimed === false) {
+      return NextResponse.json({ received: true, idempotent_skip: true });
+    }
+
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object;

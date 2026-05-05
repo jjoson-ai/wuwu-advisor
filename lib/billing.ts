@@ -237,3 +237,41 @@ export async function findUserByStripeBillingIdentity(params: {
     page += 1;
   }
 }
+
+/**
+ * Attempts to claim a Stripe webhook event_id by inserting it into
+ * stripe_webhook_events. Returns true if the insert succeeded (caller owns
+ * this delivery and should run handler logic). Returns false if the row
+ * already existed (duplicate retry — caller should return 200 without doing
+ * any work).
+ *
+ * On any non-duplicate DB error, throws — the caller should return 500 so
+ * Stripe will retry the event after the DB issue is resolved.
+ *
+ * Postgres unique-violation code is "23505".
+ */
+export async function tryClaimStripeEvent(
+  eventId: string,
+  eventType: string,
+): Promise<boolean> {
+  const supabaseAdmin = getSupabaseAdminClient();
+  const { error } = await supabaseAdmin
+    .from("stripe_webhook_events")
+    .insert({ event_id: eventId, event_type: eventType });
+
+  if (error === null) {
+    return true;
+  }
+
+  if ((error as { code?: string }).code === "23505") {
+    console.info(
+      "[Billing] Stripe webhook event already processed; skipping idempotently.",
+      { eventId, eventType },
+    );
+    return false;
+  }
+
+  throw new Error(
+    `Failed to claim Stripe webhook event id ${eventId}: ${error.message}`,
+  );
+}
