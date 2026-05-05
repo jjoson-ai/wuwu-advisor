@@ -72,7 +72,10 @@ import { getRequestAccessState } from "@/lib/debug-access";
 import { generateJsonObjectWithMeta } from "@/lib/llm";
 import { logLlmCost } from "@/lib/cost-events.server";
 import { getModelRoutingDecision } from "@/lib/model-decision";
-import { getModelForPass } from "@/lib/model-routing";
+import {
+  getModelForPass,
+  selectModelForGeneration,
+} from "@/lib/model-routing";
 import { createSSEStream } from "@/lib/generation-stream";
 import { getRequestPlatform } from "@/lib/product-events";
 import { logProductEvent } from "@/lib/product-events.server";
@@ -529,11 +532,13 @@ export async function POST(request: Request) {
         if (outputSafety.verdict === "unsafe" && outputSafety.category !== null) {
           const finalModel = (
             fallbackReason !== null
-              ? frontierModel.model
-              : routingDecision?.useFrontier === true
-                ? frontierModel.model
-                : cheapModel.model
-          );
+              ? frontierModel
+              : selectModelForGeneration({
+                  feature: "ask",
+                  routingDecision: routingDecision ?? null,
+                  cheapPass: "compose",
+                })
+          ).model;
           void logOutputSafetyFlagged({
             userId: user.id,
             feature: "ask",
@@ -585,12 +590,19 @@ export async function POST(request: Request) {
           latestDecisionGuidance !== null &&
           normalizeQuestionForInstrumentation(latestDecisionGuidance.question_text) ===
             normalizeQuestionForInstrumentation(question);
-        const finalModelSelected =
+        // Model selection follows the precedence rule centralized in
+        // lib/model-routing.ts:selectModelForGeneration — frontier wins when
+        // routingDecision.useFrontier is true; otherwise the feature-aware
+        // compose model. Don't reimplement the precedence here.
+        const finalModelSelected = (
           fallbackReason !== null
-            ? frontierModel.model
-            : routingDecision?.useFrontier === true
-              ? frontierModel.model
-              : cheapModel.model;
+            ? frontierModel
+            : selectModelForGeneration({
+                feature: "ask",
+                routingDecision: routingDecision ?? null,
+                cheapPass: "compose",
+              })
+        ).model;
         const generationPath =
           fallbackReason !== null
             ? "full_fallback"
