@@ -20,6 +20,7 @@
     "test:ux:capture": "WUWU_AUDIT_RUN_ID=${WUWU_AUDIT_RUN_ID:-$(date +%Y%m%d-%H%M%S)} playwright test tests/playwright/ux-audit.capture.spec.ts --project=chromium-audit --project=iphone-audit --headed"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.51.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.4",
     "@upstash/ratelimit": "^2.0.8",
