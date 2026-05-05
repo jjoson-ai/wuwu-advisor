@@ -87,3 +87,43 @@ What it does:
 cd "/Users/y9378348c/Documents/Hula House/astrologer-on-demand/apps/mobile"
 npm run typecheck
 ```
+
+## Building for Android via EAS
+
+EAS Build is configured at `apps/mobile/eas.json` with three profiles:
+
+- **`development`** — debug APK with the dev client baked in. Iterate against a Metro bundler.
+- **`preview`** — release-mode APK distributed via EAS internal links. Used for closed-beta sideloading on real Android phones.
+- **`production`** — `.aab` (App Bundle), what Play Store requires for upload. Auto-incremented `versionCode` is managed remotely by EAS.
+
+### First-time setup (one-time)
+
+```bash
+cd "/Users/y9378348c/Documents/Hula House/astrologer-on-demand/apps/mobile"
+npx eas-cli@latest login                # log in to Expo
+npx eas-cli@latest init                  # links this project to your EAS account; writes the projectId into app.json
+```
+
+### Build a preview APK
+
+```bash
+cd "/Users/y9378348c/Documents/Hula House/astrologer-on-demand/apps/mobile"
+npm run eas:build:preview
+```
+
+When the build finishes, install the APK from the EAS dashboard URL on a physical Android device.
+
+### Build a production app bundle
+
+```bash
+cd "/Users/y9378348c/Documents/Hula House/astrologer-on-demand/apps/mobile"
+npm run eas:build:production
+```
+
+This produces an `.aab` and uploads it as a draft to the Play Store internal-testing track via `eas.json`'s `submit.production` block. The user then promotes it manually through the Play Console testing tracks.
+
+### Notes
+
+- Asset files referenced from `app.json` (adaptive icon, splash) are not yet committed — that's G2.3. Until those land, `eas build` will fail with "asset not found." Do NOT trigger builds before G2.3 merges.
+- `eas-cli` is invoked via `npx` rather than installed as a project dep — keeps `node_modules` lean.
+

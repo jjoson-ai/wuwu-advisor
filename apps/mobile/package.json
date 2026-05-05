@@ -13,7 +13,10 @@
     "ios:install": "npm run ios:pods && npm run ios",
     "typecheck": "tsc --noEmit",
     "audit:ux:native:ios": "node ./scripts/run-native-ux-audit.mjs",
-    "audit:ux:native:list": "node ./scripts/run-native-ux-audit.mjs --list"
+    "audit:ux:native:list": "node ./scripts/run-native-ux-audit.mjs --list",
+    "eas:build:preview": "eas build --profile preview --platform android",
+    "eas:build:production": "eas build --profile production --platform android",
+    "eas:submit:internal": "eas submit --profile production --platform android --latest"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
