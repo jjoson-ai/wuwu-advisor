@@ -7,7 +7,25 @@
     "orientation": "portrait",
     "plugins": ["expo-router"],
     "android": {
-      "package": "com.astrologerondemand.app"
+      "package": "com.astrologerondemand.app",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
+      "blockedPermissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_CONTACTS",
+        "READ_PHONE_STATE",
+        "READ_CALENDAR"
+      ],
+      "softwareKeyboardLayoutMode": "pan",
+      "edgeToEdgeEnabled": true
     },
     "ios": {
       "bundleIdentifier": "com.astrologerondemand.app"
