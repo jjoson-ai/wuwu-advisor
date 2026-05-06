@@ -415,6 +415,27 @@ export default async function OpsPage({
           ])}
           emptyMessage="No attribution data yet. Will populate as users arrive with UTM params or click IDs (gclid / fbclid)."
         />
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <p className="card-eyebrow" style={{ margin: 0 }}>
+            By surface
+          </p>
+          <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
+            First-use → paywall → upgrade → pro activation per feature surface.
+            Identifies which surface converts best to Pro.
+          </p>
+        </div>
+        <DataTable
+          headers={["Surface", "First use", "Paywalls", "Upgrades", "Pro activated", "Free → Pro"]}
+          rows={dashboard.revenue.surfaceConversionRows.map((row) => [
+            row.surface,
+            `${row.firstUseCount}`,
+            `${row.paywallShown}`,
+            `${row.upgradeClicked}`,
+            `${row.proActivated}`,
+            row.freeToProRate,
+          ])}
+          emptyMessage="No surface conversion data yet. Requires first_today/forecast/blueprint/ask + paywall/upgrade/pro_activated events."
+        />
       </section>
 
       <section className="stack">
@@ -441,12 +462,16 @@ export default async function OpsPage({
         </div>
         <MetricGrid metrics={dashboard.retention.metrics} />
         <DataTable
-          headers={["Cohort (week)", "Signups", "D7 active", "D7 %"]}
+          headers={["Cohort (week)", "Signups", "D7 active", "D7 %", "D14 active", "D14 %", "D30 active", "D30 %"]}
           rows={dashboard.retention.cohortRows.map((row) => [
             row.week_label,
             `${row.signups}`,
             `${row.active_d7}`,
             row.d7_pct,
+            `${row.active_d14}`,
+            row.d14_pct,
+            row.d30_incomplete ? "…" : `${row.active_d30}`,
+            row.d30_pct,
           ])}
           emptyMessage="No cohort data yet. Will populate as users sign up and generate content."
         />
@@ -462,17 +487,19 @@ export default async function OpsPage({
           </h2>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-          Rough LTV estimate: (avg subscription tenure in weeks) × (MRR ÷ active paid users).{" "}
-          Annualised by multiplying by 12. Uses $14/mo base rate. Cohort LTV assumes uniform
-          distribution across signups in each cohort.
+          LTV per paid user: (avg subscription tenure in weeks) × (MRR ÷ paid users).{" "}
+          Annualised by multiplying by 12. Uses Stripe MRR when available; falls back to
+          $14/mo when Stripe is disconnected. Cohort LTV assumes uniform distribution
+          across signups in each cohort.
         </p>
         <MetricGrid metrics={dashboard.ltv.metrics} />
         <DataTable
-          headers={["Cohort (week)", "Signups", "Avg tenure (wks)", "Est LTV/user"]}
+          headers={["Cohort (week)", "Signups", "Avg tenure (wks)", "MRR/user", "Est LTV/user"]}
           rows={dashboard.ltv.rows.map((row) => [
             row.cohort_label,
             `${row.users}`,
             row.avg_tenure_weeks.toFixed(1),
+            row.mrr_per_user !== null ? `$${row.mrr_per_user.toFixed(2)}` : "—",
             row.est_ltv_per_user,
           ])}
           emptyMessage="No LTV data yet. Requires paid user tenure data from product_events."

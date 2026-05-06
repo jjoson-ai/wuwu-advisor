@@ -149,12 +149,27 @@ type RetentionCohortRow = {
   signups: number;
   active_d7: number;
   d7_pct: string;
+  active_d14: number;
+  d14_pct: string;
+  active_d30: number;
+  d30_pct: string;
+  d30_incomplete: boolean;
+};
+
+type ConversionBySurfaceRow = {
+  surface: string;
+  firstUseCount: number;
+  paywallShown: number;
+  upgradeClicked: number;
+  proActivated: number;
+  freeToProRate: string;
 };
 
 type LtvRow = {
   cohort_label: string;
   users: number;
   avg_tenure_weeks: number;
+  mrr_per_user: number | null;
   est_ltv_per_user: string;
 };
 
@@ -183,7 +198,7 @@ export type OperatorDashboardData = {
   revenue: {
     metrics: MetricCard[];
     conversionRows: SurfaceConversionRow[];
-    /** Signups / paywall / activations broken out by first-touch channel. */
+    surfaceConversionRows: ConversionBySurfaceRow[];
     channelRows: ChannelRow[];
   };
   retention: {
@@ -927,6 +942,39 @@ export async function getOperatorDashboardData(
     }))
     .sort((left, right) => right.checkoutCompleted - left.checkoutCompleted);
 
+  const SURFACES = ["today", "forecast", "blueprint", "ask"] as const;
+
+  const surfaceConversionRows: ConversionBySurfaceRow[] = SURFACES.map((surface) => {
+    const surfaceEvents = filteredProductEvents.filter(
+      (e) => deriveSurface(e) === surface,
+    );
+    const firstUseNames = new Set([
+      `first_${surface}_generated`,
+      surface === "ask" ? "first_ask_submitted" : "",
+    ].filter(Boolean));
+    const firstUseCount = surfaceEvents.filter(
+      (e) => firstUseNames.has(e.event_name) || e.is_first_use === true,
+    ).length;
+    const paywallShown = surfaceEvents.filter(
+      (e) => e.event_name === "paywall_shown",
+    ).length;
+    const upgradeClicked = surfaceEvents.filter(
+      (e) => e.event_name === "upgrade_clicked",
+    ).length;
+    const proActivated = surfaceEvents.filter(
+      (e) => e.event_name === "pro_activated",
+    ).length;
+
+    return {
+      surface: surface[0].toUpperCase() + surface.slice(1),
+      firstUseCount,
+      paywallShown,
+      upgradeClicked,
+      proActivated,
+      freeToProRate: percentage(proActivated, firstUseCount),
+    };
+  });
+
   // ── By-channel acquisition rollup ──────────────────────────────────────────
   // Groups attribution_channel across the full acquisition funnel. Every event
   // now carries attribution_channel (stamped at insert time from the first-touch
@@ -1163,6 +1211,8 @@ export async function getOperatorDashboardData(
     label: string;
     signups: number;
     activeD7: number;
+    activeD14: number;
+    activeD30: number;
   }
 
   const cohortMap = new Map<string, CohortAccum>();
@@ -1177,7 +1227,7 @@ export async function getOperatorDashboardData(
     if (existing) {
       existing.signups += 1;
     } else {
-      cohortMap.set(label, { label, signups: 1, activeD7: 0 });
+      cohortMap.set(label, { label, signups: 1, activeD7: 0, activeD14: 0, activeD30: 0 });
     }
     const userWeeks = userActivityWeeks.get(userId) ?? new Set<string>();
     for (const weekLabel of userWeeks) {
@@ -1187,6 +1237,14 @@ export async function getOperatorDashboardData(
       if (daysDiff >= 1 && daysDiff <= 7) {
         const cohort = cohortMap.get(label)!;
         cohort.activeD7 += 1;
+      }
+      if (daysDiff >= 8 && daysDiff <= 14) {
+        const cohort = cohortMap.get(label)!;
+        cohort.activeD14 += 1;
+      }
+      if (daysDiff >= 15 && daysDiff <= 30) {
+        const cohort = cohortMap.get(label)!;
+        cohort.activeD30 += 1;
       }
     }
   }
@@ -1213,18 +1271,37 @@ export async function getOperatorDashboardData(
     a.label.localeCompare(b.label),
   );
 
-  const cohortRows: RetentionCohortRow[] = sortedCohorts.map((cohort) => ({
-    week_label: cohort.label,
-    signups: cohort.signups,
-    active_d7: cohort.activeD7,
-    d7_pct: cohort.signups > 0 ? `${((cohort.activeD7 / cohort.signups) * 100).toFixed(0)}%` : "—",
-  }));
+  const cohortRows: RetentionCohortRow[] = sortedCohorts.map((cohort) => {
+    const cohortDate = parseIsoWeekLabel(cohort.label);
+    const cohortAgeDays = cohortDate !== null
+      ? (now.getTime() - cohortDate.getTime()) / 86400000
+      : 999;
+    const d30Incomplete = cohortAgeDays < 30;
+    return {
+      week_label: cohort.label,
+      signups: cohort.signups,
+      active_d7: cohort.activeD7,
+      d7_pct: cohort.signups > 0 ? `${((cohort.activeD7 / cohort.signups) * 100).toFixed(0)}%` : "—",
+      active_d14: cohort.activeD14,
+      d14_pct: cohort.signups > 0 ? `${((cohort.activeD14 / cohort.signups) * 100).toFixed(0)}%` : "—",
+      active_d30: cohort.activeD30,
+      d30_pct: d30Incomplete ? "…" : (cohort.signups > 0 ? `${((cohort.activeD30 / cohort.signups) * 100).toFixed(0)}%` : "—"),
+      d30_incomplete: d30Incomplete,
+    };
+  });
 
   // ── LTV estimation ─────────────────────────────────────────────────────────
   // Rough LTV per paid user: (avg tenure in weeks) * (MRR / current paid users).
   // Tenure is estimated from the gap between each paid user's first event and
   // the latest event in the window. Only paid users with ≥1 event contribute.
-  const MONTHLY_PRICE = 14;
+  const mrrPerPaidUser = stripeRevenue.mrr !== null && currentPaidUsers.length > 0
+    ? stripeRevenue.mrr / currentPaidUsers.length
+    : null;
+  const MONTHLY_PRICE_FALLBACK = 14;
+  const effectiveMrrPerUser = mrrPerPaidUser ?? MONTHLY_PRICE_FALLBACK;
+
+  const estimatedLtvSource = stripeRevenue.mrr !== null ? "live" as const : "proxy" as const;
+
   const paidUsersWithTenure = currentPaidUsers
     .map((user) => {
       const userEvents = productEventsResult.rows.filter(
@@ -1252,18 +1329,19 @@ export async function getOperatorDashboardData(
 
   const avgLtvPerUser =
     avgTenureWeeks !== null && currentPaidUsers.length > 0
-      ? avgTenureWeeks * (MONTHLY_PRICE / Math.max(currentPaidUsers.length / windowWeeks, 1))
+      ? avgTenureWeeks * (effectiveMrrPerUser / Math.max(currentPaidUsers.length / windowWeeks, 1))
       : null;
 
   const ltvRows: LtvRow[] = sortedCohorts.map((cohort) => {
     const estLtv =
       cohort.signups > 0 && avgTenureWeeks !== null
-        ? cohort.signups * (MONTHLY_PRICE / Math.max(cohort.signups, 1)) * avgTenureWeeks
+        ? cohort.signups * (effectiveMrrPerUser / Math.max(cohort.signups, 1)) * avgTenureWeeks
         : 0;
     return {
       cohort_label: cohort.label,
       users: cohort.signups,
       avg_tenure_weeks: avgTenureWeeks ?? 0,
+      mrr_per_user: mrrPerPaidUser,
       est_ltv_per_user: avgLtvPerUser !== null ? `$${avgLtvPerUser.toFixed(2)}` : "—",
     };
   });
@@ -1337,6 +1415,7 @@ export async function getOperatorDashboardData(
         },
       ],
       conversionRows,
+      surfaceConversionRows,
       channelRows,
     },
     retention: {
@@ -1344,13 +1423,13 @@ export async function getOperatorDashboardData(
         {
           label: "Paid active users",
           value: `${paidActiveUserIds.size}`,
-          detail: `Proxy: paid accounts with ≥1 tracked event in the window. True D7/D30 cohort at /ops/funnel.`,
+          detail: `Proxy: paid accounts with ≥1 tracked event in the window. D7/D14/D30 cohort detail below.`,
           status: "proxy",
         },
         {
           label: "Paid active share",
           value: percentage(paidActiveUserIds.size, currentPaidUsers.length),
-          detail: "Proxy. True cohort retention table at /ops/funnel.",
+          detail: "Proxy. D7/D14/D30 cohort retention table below.",
           status: "proxy",
         },
       ],
@@ -1363,9 +1442,9 @@ export async function getOperatorDashboardData(
           value: avgLtvPerUser !== null ? `$${avgLtvPerUser.toFixed(2)}` : "—",
           detail:
             avgLtvPerUser !== null
-              ? `Based on ${currentPaidUsers.length} active paid users across ~${windowWeeks} weeks. Annualised: $${(avgLtvPerUser * 12).toFixed(2)}/user. Rough estimate — actual depends on retention and plan mix.`
+              ? `Based on ${currentPaidUsers.length} active paid users across ~${windowWeeks} weeks. Annualised: $${(avgLtvPerUser * 12).toFixed(2)}/user. Uses Stripe MRR${mrrPerPaidUser !== null ? ` ($${mrrPerPaidUser.toFixed(2)}/user)` : " (unavailable — $14/mo fallback)"}.`
               : "Insufficient paid-user tenure data.",
-          status: currentPaidUsers.length > 0 ? "proxy" : "placeholder",
+          status: estimatedLtvSource,
         } satisfies MetricCard,
         {
           label: "Avg tenure (weeks)",
@@ -1375,6 +1454,15 @@ export async function getOperatorDashboardData(
               ? `Average subscription tenure across ${currentPaidUsers.length} active paid users in this window. Excludes users with no product_events.`
               : "No tenure data yet.",
           status: currentPaidUsers.length > 0 ? "proxy" : "placeholder",
+        } satisfies MetricCard,
+        {
+          label: "MRR per paid user",
+          value: mrrPerPaidUser !== null ? `$${mrrPerPaidUser.toFixed(2)}` : "—",
+          detail:
+            mrrPerPaidUser !== null
+              ? `Stripe MRR ($${stripeRevenue.mrr!.toFixed(2)}) ÷ ${currentPaidUsers.length} active paid users.`
+              : "Stripe MRR unavailable — using $14/mo fallback for LTV.",
+          status: mrrPerPaidUser !== null ? "live" : "proxy",
         } satisfies MetricCard,
       ],
       rows: ltvRows,
