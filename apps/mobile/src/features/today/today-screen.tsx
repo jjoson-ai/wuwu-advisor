@@ -598,7 +598,7 @@ export function TodayScreenContent() {
               }}
               style={styles.secondaryButton}
             >
-                <Text style={styles.secondaryButtonText}>Start 7-day free trial</Text>
+                <Text style={styles.secondaryButtonText}>Get more uses</Text>
               </Pressable>
             ) : null}
         </View>
