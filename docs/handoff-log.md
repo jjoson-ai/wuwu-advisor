@@ -64,7 +64,7 @@ Format spec: see `docs/coordinator-handoff.md` §12.
 - G2.6 re-created (astrologerondemand-f5z)
 
 **Deferred decisions (carryover):**
-- D1: Mobile plan selection (monthly vs annual) — 2.8 agent flagged; web pricing has both, mobile defaults to one. Product decision.
+- D1: Mobile plan selection (monthly vs annual) — IMPLEMENTED. PlanSelector UI added to LockedFeatureCard. Annual default + highlighted. 7-day trial CTA stays on button. Web parity achieved. (Commit: 207cc07)
 - D2: Refresh-limit CTA copy — "Start 7-day free trial" used in both paywall and usage-limit contexts. Consider differentiating: "Get more uses" for usage limits.
 
 **Next-session handoff notes:**
