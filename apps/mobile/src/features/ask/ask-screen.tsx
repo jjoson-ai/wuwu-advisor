@@ -612,7 +612,7 @@ export function AskScreenContent() {
                 }}
                 style={styles.secondaryButton}
               >
-                <Text style={styles.secondaryButtonText}>Upgrade to Pro</Text>
+                <Text style={styles.secondaryButtonText}>Start 7-day free trial</Text>
               </Pressable>
             ) : null}
           </View>

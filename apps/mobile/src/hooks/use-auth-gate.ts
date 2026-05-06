@@ -37,7 +37,7 @@ export function useAuthGateState() {
       },
     dailyUsageLimits:
       settingsQuery.data?.dailyUsageLimits ?? {
-        askQuestionsPerDay: 2,
+        askQuestionsPerDay: 3,
         todayRefreshesPerDay: null,
       },
     settingsError,

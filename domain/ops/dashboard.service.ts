@@ -3,6 +3,7 @@ import "server-only";
 import type { PostgrestError } from "@supabase/supabase-js";
 
 import { getUserAccessLevel, type AccessLevel } from "@/lib/access";
+import { fetchAdSpend, seedMockAdSpendIfNeeded, type AdSpendRow } from "@/lib/ad-spend.server";
 import { getStripeServerClient } from "@/lib/stripe";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -143,6 +144,30 @@ type RoutingMixRow = {
   fallbackRate: string;
 };
 
+type RetentionCohortRow = {
+  week_label: string;
+  signups: number;
+  active_d7: number;
+  d7_pct: string;
+};
+
+type LtvRow = {
+  cohort_label: string;
+  users: number;
+  avg_tenure_weeks: number;
+  est_ltv_per_user: string;
+};
+
+type AdSpendChannelRow = {
+  channel: string;
+  spend: string;
+  impressions: number;
+  clicks: number;
+  cpc: string;
+  cpm: string;
+  source: string;
+};
+
 export type OperatorDashboardData = {
   filters: DashboardFilters;
   windowLabel: string;
@@ -163,6 +188,11 @@ export type OperatorDashboardData = {
   };
   retention: {
     metrics: MetricCard[];
+    cohortRows: RetentionCohortRow[];
+  };
+  ltv: {
+    metrics: MetricCard[];
+    rows: LtvRow[];
   };
   usage: {
     metrics: MetricCard[];
@@ -176,6 +206,10 @@ export type OperatorDashboardData = {
   };
   quality: {
     metrics: MetricCard[];
+  };
+  adSpend: {
+    metrics: MetricCard[];
+    channelRows: AdSpendChannelRow[];
   };
 };
 
@@ -568,6 +602,10 @@ export async function getOperatorDashboardData(
   const priorRange = buildPriorWindowRange(filters.timeWindow, now);
   const setupNotes: string[] = [];
 
+  // Seed mock ad-spend data if the table is empty (no real API creds yet).
+  // This is fire-and-forget — dashboard does not block on seeding.
+  void seedMockAdSpendIfNeeded(30).catch(() => {});
+
   const [stripeRevenue] = await Promise.all([safeFetchStripeRevenue(setupNotes)]);
 
   const productEventsResult = await safeFetchTelemetryRows<ProductEventRow>(
@@ -617,6 +655,24 @@ export async function getOperatorDashboardData(
       ),
     setupNotes,
   );
+
+  // ── Ad-spend data ──────────────────────────────────────────────────────────
+  // Fetches daily ad_spend rows for the selected window and prior window (for
+  // deltas). Falls back gracefully if the table does not exist yet.
+  const adSpendWindowStart = buildTimeWindowStart(filters.timeWindow, now)
+    .toISOString()
+    .slice(0, 10);
+  const adSpendWindowEnd = now.toISOString().slice(0, 10);
+  const adSpendRows: AdSpendRow[] = await fetchAdSpend(adSpendWindowStart, adSpendWindowEnd).catch(
+    () => {
+      setupNotes.push("Ad-spend table not yet created. Run sql/014_ad_spend.sql in Supabase.");
+      return [] as AdSpendRow[];
+    },
+  );
+  const priorAdSpendRows: AdSpendRow[] = await fetchAdSpend(
+    priorRange.start.toISOString().slice(0, 10),
+    priorRange.end.toISOString().slice(0, 10),
+  ).catch(() => [] as AdSpendRow[]);
 
   const briefingFeedbackRows = await fetchAllRows<BriefingFeedbackRow>(async (from, to) =>
     await supabase
@@ -1055,6 +1111,163 @@ export async function getOperatorDashboardData(
     ? formatDelta(askSubmitted.length, priorAskSubmitted.length)
     : null;
 
+  // ── Cohort retention ───────────────────────────────────────────────────────
+  // Approximate D7 retention by signup week from product_events. We bucket
+  // users by the ISO week of their first event, then check how many had
+  // activity within 7 days of signup. This is a rough proxy — true cohort
+  // retention is at /ops/funnel.
+  const RETENTION_LOOKBACK_DAYS = 90;
+  const retentionCutoff = new Date(now);
+  retentionCutoff.setUTCDate(retentionCutoff.getUTCDate() - RETENTION_LOOKBACK_DAYS);
+
+  const signupRowsForRetention = productEventsResult.rows.filter(
+    (row) =>
+      row.event_name === "signup_completed" &&
+      row.user_id !== null &&
+      row.occurred_at >= retentionCutoff.toISOString(),
+  );
+
+  const activityEventNames = new Set([
+    "today_generated", "forecast_generated", "blueprint_generated", "ask_submitted",
+    "first_today_generated", "first_forecast_generated",
+    "first_blueprint_generated", "first_ask_submitted",
+  ]);
+
+  const userFirstEventTime = new Map<string, number>();
+  const userActivityWeeks = new Map<string, Set<string>>();
+
+  for (const row of productEventsResult.rows) {
+    if (row.user_id === null) continue;
+    const occurredAt = new Date(row.occurred_at).getTime();
+    const existingFirst = userFirstEventTime.get(row.user_id);
+    if (existingFirst === undefined || occurredAt < existingFirst) {
+      userFirstEventTime.set(row.user_id, occurredAt);
+    }
+    if (activityEventNames.has(row.event_name)) {
+      const weekLabel = getIsoWeekLabel(new Date(occurredAt));
+      const weeks = userActivityWeeks.get(row.user_id) ?? new Set<string>();
+      weeks.add(weekLabel);
+      userActivityWeeks.set(row.user_id, weeks);
+    }
+  }
+
+  function getIsoWeekLabel(date: Date) {
+    const startOfYear = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil(
+      ((date.getTime() - startOfYear.getTime()) / 86400000 + startOfYear.getUTCDay() + 1) / 7,
+    );
+    return `W${weekNo.toString().padStart(2, "0")} ${date.getUTCFullYear()}`;
+  }
+
+  interface CohortAccum {
+    label: string;
+    signups: number;
+    activeD7: number;
+  }
+
+  const cohortMap = new Map<string, CohortAccum>();
+  for (const row of signupRowsForRetention) {
+    const userId = row.user_id!;
+    const firstTime = userFirstEventTime.get(userId);
+    if (firstTime === undefined) continue;
+    const signupDate = new Date(firstTime);
+    const label = getIsoWeekLabel(signupDate);
+    const signupWeekStart = getWeekStart(signupDate);
+    const existing = cohortMap.get(label);
+    if (existing) {
+      existing.signups += 1;
+    } else {
+      cohortMap.set(label, { label, signups: 1, activeD7: 0 });
+    }
+    const userWeeks = userActivityWeeks.get(userId) ?? new Set<string>();
+    for (const weekLabel of userWeeks) {
+      const weekDate = parseIsoWeekLabel(weekLabel);
+      if (weekDate === null) continue;
+      const daysDiff = (weekDate.getTime() - signupWeekStart.getTime()) / 86400000;
+      if (daysDiff >= 1 && daysDiff <= 7) {
+        const cohort = cohortMap.get(label)!;
+        cohort.activeD7 += 1;
+      }
+    }
+  }
+
+  function getWeekStart(date: Date) {
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+    return d;
+  }
+
+  function parseIsoWeekLabel(label: string) {
+    const match = label.match(/^W(\d+)\s+(\d+)$/);
+    if (!match) return null;
+    const weekNo = parseInt(match[1], 10);
+    const year = parseInt(match[2], 10);
+    const startOfYear = new Date(Date.UTC(year, 0, 1));
+    const daysIntoYear = (weekNo - 1) * 7;
+    const jan1Day = startOfYear.getUTCDay();
+    const daysToMonday = (jan1Day <= 4 ? jan1Day - 1 : jan1Day - 8) * -1;
+    return new Date(Date.UTC(year, 0, 1 + daysIntoYear + daysToMonday));
+  }
+
+  const sortedCohorts = Array.from(cohortMap.values()).sort((a, b) =>
+    a.label.localeCompare(b.label),
+  );
+
+  const cohortRows: RetentionCohortRow[] = sortedCohorts.map((cohort) => ({
+    week_label: cohort.label,
+    signups: cohort.signups,
+    active_d7: cohort.activeD7,
+    d7_pct: cohort.signups > 0 ? `${((cohort.activeD7 / cohort.signups) * 100).toFixed(0)}%` : "—",
+  }));
+
+  // ── LTV estimation ─────────────────────────────────────────────────────────
+  // Rough LTV per paid user: (avg tenure in weeks) * (MRR / current paid users).
+  // Tenure is estimated from the gap between each paid user's first event and
+  // the latest event in the window. Only paid users with ≥1 event contribute.
+  const MONTHLY_PRICE = 14;
+  const paidUsersWithTenure = currentPaidUsers
+    .map((user) => {
+      const userEvents = productEventsResult.rows.filter(
+        (row) => row.user_id === user.id,
+      );
+      if (userEvents.length === 0) return null;
+      const firstTime = Math.min(...userEvents.map((e) => new Date(e.occurred_at).getTime()));
+      const lastTime = Math.max(...userEvents.map((e) => new Date(e.occurred_at).getTime()));
+      const tenureMs = lastTime - firstTime;
+      if (tenureMs <= 0) return null;
+      return tenureMs / (7 * 24 * 60 * 60 * 1000);
+    })
+    .filter((t): t is number => t !== null);
+
+  const avgTenureWeeks =
+    paidUsersWithTenure.length > 0
+      ? paidUsersWithTenure.reduce((sum, t) => sum + t, 0) / paidUsersWithTenure.length
+      : null;
+
+  const windowWeeks =
+    filters.timeWindow === "today" ? 1
+    : filters.timeWindow === "7d" ? 1
+    : filters.timeWindow === "30d" ? 4.3
+    : now.getUTCDate() / 7;
+
+  const avgLtvPerUser =
+    avgTenureWeeks !== null && currentPaidUsers.length > 0
+      ? avgTenureWeeks * (MONTHLY_PRICE / Math.max(currentPaidUsers.length / windowWeeks, 1))
+      : null;
+
+  const ltvRows: LtvRow[] = sortedCohorts.map((cohort) => {
+    const estLtv =
+      cohort.signups > 0 && avgTenureWeeks !== null
+        ? cohort.signups * (MONTHLY_PRICE / Math.max(cohort.signups, 1)) * avgTenureWeeks
+        : 0;
+    return {
+      cohort_label: cohort.label,
+      users: cohort.signups,
+      avg_tenure_weeks: avgTenureWeeks ?? 0,
+      est_ltv_per_user: avgLtvPerUser !== null ? `$${avgLtvPerUser.toFixed(2)}` : "—",
+    };
+  });
+
   return {
     filters,
     windowLabel: buildWindowLabel(filters),
@@ -1141,6 +1354,30 @@ export async function getOperatorDashboardData(
           status: "proxy",
         },
       ],
+      cohortRows,
+    },
+    ltv: {
+      metrics: [
+        {
+          label: "Avg LTV per paid user",
+          value: avgLtvPerUser !== null ? `$${avgLtvPerUser.toFixed(2)}` : "—",
+          detail:
+            avgLtvPerUser !== null
+              ? `Based on ${currentPaidUsers.length} active paid users across ~${windowWeeks} weeks. Annualised: $${(avgLtvPerUser * 12).toFixed(2)}/user. Rough estimate — actual depends on retention and plan mix.`
+              : "Insufficient paid-user tenure data.",
+          status: currentPaidUsers.length > 0 ? "proxy" : "placeholder",
+        } satisfies MetricCard,
+        {
+          label: "Avg tenure (weeks)",
+          value: avgTenureWeeks !== null ? avgTenureWeeks.toFixed(1) : "—",
+          detail:
+            avgTenureWeeks !== null
+              ? `Average subscription tenure across ${currentPaidUsers.length} active paid users in this window. Excludes users with no product_events.`
+              : "No tenure data yet.",
+          status: currentPaidUsers.length > 0 ? "proxy" : "placeholder",
+        } satisfies MetricCard,
+      ],
+      rows: ltvRows,
     },
     usage: {
       metrics: [
@@ -1332,5 +1569,96 @@ export async function getOperatorDashboardData(
         },
       ],
     },
+    // ── Ad-spend section ──────────────────────────────────────────────────────
+    // Aggregates ad_spend by channel for the selected window. CPA is computed
+    // by joining with the attribution data already in channelRows (signups,
+    // activations per channel). Data source is mock until real API credentials
+    // (META_ADS_ACCESS_TOKEN, GOOGLE_ADS_*) are configured.
+    adSpend: (() => {
+      const totalSpend = adSpendRows.reduce((sum, row) => sum + row.spend_usd, 0);
+      const priorTotalSpend = priorAdSpendRows.reduce((sum, row) => sum + row.spend_usd, 0);
+      const spendDelta = formatDelta(totalSpend, priorTotalSpend);
+
+      const totalImpressions = adSpendRows.reduce(
+        (sum, row) => sum + (row.impressions ?? 0), 0,
+      );
+      const totalClicks = adSpendRows.reduce(
+        (sum, row) => sum + (row.clicks ?? 0), 0,
+      );
+
+      // CPA: total spend / total paid activations (across all channels)
+      const totalPaidActivations = channelRows.reduce(
+        (sum, row) => sum + row.paidActivations, 0,
+      );
+      const cpa = totalPaidActivations > 0 ? totalSpend / totalPaidActivations : null;
+
+      // Per-channel aggregation
+      const channelSpendMap = new Map<string, { spend: number; impressions: number; clicks: number; source: string }>();
+      for (const row of adSpendRows) {
+        const existing = channelSpendMap.get(row.channel) ?? { spend: 0, impressions: 0, clicks: 0, source: row.source };
+        existing.spend += row.spend_usd;
+        existing.impressions += row.impressions ?? 0;
+        existing.clicks += row.clicks ?? 0;
+        channelSpendMap.set(row.channel, existing);
+      }
+
+      const adSpendChannelRows: AdSpendChannelRow[] = Array.from(channelSpendMap.entries())
+        .map(([channel, data]) => ({
+          channel: channel === "meta" ? "Meta" : channel === "google" ? "Google" : channel,
+          spend: formatUsd(data.spend),
+          impressions: data.impressions,
+          clicks: data.clicks,
+          cpc: data.clicks > 0 ? formatUsd(data.spend / data.clicks) : "—",
+          cpm: data.impressions > 0 ? formatUsd((data.spend / data.impressions) * 1000) : "—",
+          source: data.source,
+        }))
+        .sort((a, b) => {
+          const aSpend = parseFloat(a.spend.replace(/[$,]/g, "")) || 0;
+          const bSpend = parseFloat(b.spend.replace(/[$,]/g, "")) || 0;
+          return bSpend - aSpend;
+        });
+
+      const adSpendStatus: MetricStatus = adSpendRows.length > 0
+        ? (adSpendRows[0].source === "mock" ? "proxy" : "live")
+        : "placeholder";
+      const isMock = adSpendRows.length > 0 && adSpendRows[0].source === "mock";
+
+      return {
+        metrics: [
+          {
+            label: "Total ad spend",
+            value: adSpendRows.length === 0 ? "—" : formatUsd(totalSpend),
+            detail:
+              adSpendRows.length === 0
+                ? "No ad-spend data yet. Run sql/014_ad_spend.sql and seed mock data or configure API credentials."
+                : isMock
+                  ? `${adSpendRows.length} rows of mock data. ${totalClicks > 0 ? `${totalClicks.toLocaleString()} clicks across ${channelSpendMap.size} channel(s).` : ""} Configure META_ADS_ACCESS_TOKEN and GOOGLE_ADS_* for real data.`
+                  : `${adSpendRows.length} rows across ${channelSpendMap.size} channel(s). ${totalClicks > 0 ? `${totalClicks.toLocaleString()} clicks.` : ""}`,
+            status: adSpendStatus,
+            delta: spendDelta?.text ?? null,
+            deltaDirection: spendDelta?.direction ?? "neutral",
+          } satisfies MetricCard,
+          {
+            label: "CPA (blended)",
+            value: cpa !== null ? formatUsd(cpa) : "—",
+            detail:
+              cpa !== null
+                ? `Total spend / paid activations. ${totalPaidActivations} activation${totalPaidActivations !== 1 ? "s" : ""} in this window.`
+                : "No paid activations in this window — CPA cannot be computed.",
+            status: cpa !== null ? adSpendStatus : "placeholder",
+          } satisfies MetricCard,
+          {
+            label: "CTR",
+            value: percentage(totalClicks, totalImpressions),
+            detail:
+              totalImpressions > 0
+                ? `${totalClicks.toLocaleString()} clicks / ${totalImpressions.toLocaleString()} impressions across all channels.`
+                : "No impression data available.",
+            status: totalImpressions > 0 ? adSpendStatus : "placeholder",
+          } satisfies MetricCard,
+        ],
+        channelRows: adSpendChannelRows,
+      };
+    })(),
   };
 }

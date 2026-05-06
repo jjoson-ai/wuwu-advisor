@@ -598,9 +598,9 @@ export function TodayScreenContent() {
               }}
               style={styles.secondaryButton}
             >
-              <Text style={styles.secondaryButtonText}>Upgrade to Pro</Text>
-            </Pressable>
-          ) : null}
+                <Text style={styles.secondaryButtonText}>Get more uses</Text>
+              </Pressable>
+            ) : null}
         </View>
 
         {todayQuery.isPending && briefing === null ? (
@@ -802,8 +802,25 @@ export function TodayScreenContent() {
                   textStyle={styles.secondaryText}
                   formatText={formatNumerologyMention}
                 />
-                <Pressable style={styles.secondaryButton}>
-                  <Text style={styles.secondaryButtonText}>Upgrade to Pro</Text>
+                <Pressable
+                  onPress={() => {
+                    void (async () => {
+                      await trackProductEvent({
+                        event_name: "upgrade_clicked",
+                        feature: "today",
+                        plan_type: "pro",
+                        upgrade_surface: "today_blueprint_upsell",
+                      });
+
+                      await startProCheckout({
+                        feature: "today",
+                        upgradeSurface: "today_blueprint_upsell",
+                      });
+                    })();
+                  }}
+                  style={styles.secondaryButton}
+                >
+                  <Text style={styles.secondaryButtonText}>Start 7-day free trial</Text>
                 </Pressable>
               </InsightCard>
             )}

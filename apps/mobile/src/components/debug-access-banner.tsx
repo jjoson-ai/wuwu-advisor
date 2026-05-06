@@ -6,6 +6,7 @@ import {
   Text,
   View,
 } from "react-native";
+import * as Sentry from "@sentry/react-native";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -29,6 +30,8 @@ type DebugAccessBannerProps = {
 export function DebugAccessBanner({
   accessLevel,
 }: DebugAccessBannerProps) {
+  if (!__DEV__) return null;
+
   const queryClient = useQueryClient();
   const [selectedOverride, setSelectedOverride] = useState<
     DebugAccessLevel | "auto"
@@ -101,6 +104,18 @@ export function DebugAccessBanner({
           );
         })}
       </View>
+      <Pressable
+        style={[styles.button, styles.crashButton]}
+        disabled={!__DEV__ || isUpdating}
+        onPress={() => {
+          void Sentry.captureMessage("Test crash from debug banner");
+          void Sentry.nativeCrash();
+        }}
+      >
+        <Text style={[styles.buttonText, styles.crashButtonText]}>
+          Test Crash
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -147,6 +162,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   buttonTextSelected: {
+    color: "#FFFFFF",
+  },
+  crashButton: {
+    backgroundColor: brandColors.accent,
+    borderColor: brandColors.accent,
+    marginTop: brandSpacing.card / 2,
+  },
+  crashButtonText: {
     color: "#FFFFFF",
   },
 });

@@ -5,6 +5,7 @@ import { apiRequest } from "@/api/client";
 type StartProCheckoutInput = {
   upgradeSurface: string;
   feature?: "today" | "forecast" | "blueprint" | "ask";
+  plan?: "monthly" | "annual";
 };
 
 type CheckoutResponse = {
@@ -32,6 +33,7 @@ export async function startProCheckout(input: StartProCheckoutInput) {
     body: JSON.stringify({
       returnPath: getReturnPath(input.feature),
       upgradeSurface: input.upgradeSurface,
+      plan: input.plan ?? "annual",
     }),
   });
 

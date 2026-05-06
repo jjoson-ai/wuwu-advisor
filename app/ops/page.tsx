@@ -392,8 +392,8 @@ export default async function OpsPage({
             Channels: <code>google_paid</code> (gclid), <code>meta_paid</code>{" "}
             (fbclid), <code>other_paid</code> (UTM), <code>organic_search</code>,{" "}
             <code>referral</code>, <code>direct</code>.
-            CPA / LTV-by-channel unlock once <code>channel_spend</code> is
-            ingested (see roadmap 2.5).
+            CPA-by-channel is now computed from <code>ad_spend</code> data below (see
+            roadmap 2.7).
           </p>
         </div>
         <DataTable
@@ -440,6 +440,43 @@ export default async function OpsPage({
           </a>
         </div>
         <MetricGrid metrics={dashboard.retention.metrics} />
+        <DataTable
+          headers={["Cohort (week)", "Signups", "D7 active", "D7 %"]}
+          rows={dashboard.retention.cohortRows.map((row) => [
+            row.week_label,
+            `${row.signups}`,
+            `${row.active_d7}`,
+            row.d7_pct,
+          ])}
+          emptyMessage="No cohort data yet. Will populate as users sign up and generate content."
+        />
+      </section>
+
+      <section className="stack">
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <p className="card-eyebrow" style={{ margin: 0 }}>
+            LTV estimate
+          </p>
+          <h2 className="section-heading-serif" style={{ margin: 0 }}>
+            Revenue per user over time
+          </h2>
+        </div>
+        <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
+          Rough LTV estimate: (avg subscription tenure in weeks) × (MRR ÷ active paid users).{" "}
+          Annualised by multiplying by 12. Uses $14/mo base rate. Cohort LTV assumes uniform
+          distribution across signups in each cohort.
+        </p>
+        <MetricGrid metrics={dashboard.ltv.metrics} />
+        <DataTable
+          headers={["Cohort (week)", "Signups", "Avg tenure (wks)", "Est LTV/user"]}
+          rows={dashboard.ltv.rows.map((row) => [
+            row.cohort_label,
+            `${row.users}`,
+            row.avg_tenure_weeks.toFixed(1),
+            row.est_ltv_per_user,
+          ])}
+          emptyMessage="No LTV data yet. Requires paid user tenure data from product_events."
+        />
       </section>
 
       <section className="stack">
@@ -512,6 +549,32 @@ export default async function OpsPage({
           </h2>
         </div>
         <MetricGrid metrics={dashboard.quality.metrics} />
+      </section>
+
+      <section className="stack">
+        <div className="stack" style={{ gap: "0.3rem" }}>
+          <p className="card-eyebrow" style={{ margin: 0 }}>
+            Ad spend
+          </p>
+          <h2 className="section-heading-serif" style={{ margin: 0 }}>
+            Cost per channel and CPA
+          </h2>
+        </div>
+        <MetricGrid metrics={dashboard.adSpend.metrics} />
+        {dashboard.adSpend.channelRows.length > 0 && (
+          <DataTable
+            headers={["Channel", "Spend", "Impressions", "Clicks", "CPC", "CPM", "Source"]}
+            rows={dashboard.adSpend.channelRows.map((row) => [
+              row.channel,
+              row.spend,
+              row.impressions.toLocaleString(),
+              row.clicks.toLocaleString(),
+              row.cpc,
+              row.cpm,
+              row.source,
+            ])}
+          />
+        )}
       </section>
     </div>
   );

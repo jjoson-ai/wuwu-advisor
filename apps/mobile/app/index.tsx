@@ -9,7 +9,7 @@ export default function IndexScreen() {
   if (gate.isLoading) {
     return (
       <ScreenPlaceholder
-        title="Astrologer On Demand"
+        title="WUWU"
         description="Loading your session..."
       />
     );
@@ -22,7 +22,7 @@ export default function IndexScreen() {
   if (gate.settingsError) {
     return (
       <ScreenPlaceholder
-        title="Astrologer On Demand"
+        title="WUWU"
         description={gate.settingsError}
       />
     );

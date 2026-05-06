@@ -1,15 +1,19 @@
 {
   "expo": {
-    "name": "Astrologer On Demand",
+    "name": "WUWU",
     "slug": "astrologer-on-demand",
     "scheme": "astrologerondemand",
     "version": "0.1.0",
     "orientation": "portrait",
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router"
+    ],
     "android": {
       "package": "com.astrologerondemand.app",
       "versionCode": 1,
       "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
         "INTERNET",
         "ACCESS_NETWORK_STATE"
       ],
@@ -22,19 +26,45 @@
         "RECORD_AUDIO",
         "READ_CONTACTS",
         "READ_PHONE_STATE",
+        "READ_CALENDAR",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_CONTACTS",
+        "READ_PHONE_STATE",
         "READ_CALENDAR"
       ],
       "softwareKeyboardLayoutMode": "pan",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./android-adaptive-foreground.png",
+        "backgroundColor": "#0B0B14",
+        "monochromeImage": "./android-adaptive-monochrome.png"
+      }
     },
     "ios": {
       "bundleIdentifier": "com.astrologerondemand.app"
     },
+    "splash": {
+      "backgroundColor": "#0B0B14",
+      "image": "./android-splash.png"
+    },
     "experiments": {
       "typedRoutes": true
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
+    "runtimeVersion": "1.0.0",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ef2f5521-d57e-4910-9d07-5c54e1d89c34"
+      }
+    },
+    "owner": "jjoson",
+    "updates": {
+      "url": "https://u.expo.dev/ef2f5521-d57e-4910-9d07-5c54e1d89c34"
     }
   }
 }
