@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { trackProductEvent } from "@/lib/product-events";
 import { startProCheckout } from "@/lib/pro-checkout";
+import { PlanSelector, type PlanOption } from "@/components/plan-selector";
 import { appUi } from "@/theme/app-ui";
 import { brandColors, brandRadii, brandSpacing } from "@/theme/brand";
 
@@ -15,6 +16,7 @@ type LockedFeatureCardProps = {
   upgradeSurface?: string;
   featured?: boolean;
   bullets?: ReadonlyArray<string>;
+  plan?: "monthly" | "annual";
 };
 
 export function LockedFeatureCard({
@@ -26,7 +28,9 @@ export function LockedFeatureCard({
   upgradeSurface,
   featured = false,
   bullets,
+  plan = "annual",
 }: LockedFeatureCardProps) {
+  const [selectedPlan, setSelectedPlan] = useState<PlanOption>(plan);
   const isStaleState = statusLabel.toLowerCase().includes("refresh");
 
   useEffect(() => {
@@ -79,6 +83,7 @@ export function LockedFeatureCard({
           })}
         </View>
       ) : null}
+      <PlanSelector value={selectedPlan} onChange={setSelectedPlan} />
       <Pressable
         onPress={() => {
           if (feature == null || upgradeSurface == null) {
@@ -96,6 +101,7 @@ export function LockedFeatureCard({
             await startProCheckout({
               feature,
               upgradeSurface,
+              plan: selectedPlan,
             });
           })();
         }}
