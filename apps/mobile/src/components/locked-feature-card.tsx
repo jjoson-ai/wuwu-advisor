@@ -20,7 +20,7 @@ type LockedFeatureCardProps = {
 export function LockedFeatureCard({
   title,
   description,
-  ctaLabel = "Upgrade to Pro",
+  ctaLabel = "Start 7-day free trial",
   statusLabel = "Included in Pro",
   feature,
   upgradeSurface,

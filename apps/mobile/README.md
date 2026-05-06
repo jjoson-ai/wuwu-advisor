@@ -1,4 +1,4 @@
-# Astrologer On Demand Mobile
+# WUWU Mobile
 
 This is the Phase B Expo shell for the future mobile app.
 

@@ -2,8 +2,11 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 
+import { initSentry } from "@/sentry.client.config";
 import { AuthProvider } from "@/providers/auth-provider";
 import { QueryProvider } from "@/providers/query-provider";
+
+initSentry();
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts(Ionicons.font);

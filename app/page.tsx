@@ -263,19 +263,16 @@ function MarketingLanding() {
         </span>
         <p className="page-kicker">{BRAND_NAME} · Personal decision advisor</p>
         <h1 className="page-title">
-          Astrology that actually
+          Your chart. Your timing.
           <br />
-          tells you what to do.
+          Your next move.
         </h1>
         <p className="page-subtitle">
-          Most astrology apps give you vibes. {PRODUCT_NAME} reads your birth
-          chart across three systems — Western astrology, numerology, and
-          Chinese zodiac — and translates it into daily timing, a 30-day plan,
-          and real answers to the decisions on your plate.
+          {PRODUCT_NAME} reads your birth chart across three systems — Western astrology, numerology, and Chinese zodiac — and translates it into specific timing and decisions for what&apos;s actually on your plate.
         </p>
         <div className="page-actions">
           <Link className="button secondary" href="#sample">
-            See a sample read ↓
+            See how it works ↓
           </Link>
         </div>
       </section>
