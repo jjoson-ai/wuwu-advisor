@@ -6,6 +6,32 @@ Format spec: see `docs/coordinator-handoff.md` §12.
 
 ---
 
+### 2026-05-06 (model: glm-5.1:cloud) — Cohort Retention Wave 2
+
+**Issues touched:** Cohort retention wave 2
+**Outcome:** Shipped to main
+
+**What was done:**
+- Retention table: D7 + D14 + D30 columns + d30_incomplete flag
+- LTV table: MRR/user from Stripe subscription data (not flat $14 estimate)
+- Revenue: new By Surface conversion funnel (Today/Forecast/Blueprint/Ask)
+- Align @sentry/react-native to ~7.2.0 for Expo SDK 54 compat
+
+**Files modified:**
+- domain/ops/dashboard.service.ts — D14/D30 cohort cols, ConversionBySurfaceRow, MRR/user
+- app/ops/page.tsx — D14/D30 retention table cols, MRR/user LTV column, By Surface conversion table
+- apps/mobile/package.json — Sentry version fix
+
+**Verification:**
+- ops dashboard: confirmed D14/D30 columns, MRR/user, By Surface table visible
+
+**Next-session handoff notes:**
+- Board is clear
+- Ops dashboard fully functional with cohort + surface conversion metrics
+- Mobile Sentry DSN wired (com.astrologerondemand.app project)
+
+---
+
 ### 2026-05-06 (model: minimax-m2.7:cloud) — OpenCode session
 
 **Issues touched:** astrologerondemand-kfv, astrologerondemand-0w5, astrologerondemand-g9b, astrologerondemand-ecm, astrologerondemand-899, astrologerondemand-dtd, astrologerondemand-6p5, D1, D2
