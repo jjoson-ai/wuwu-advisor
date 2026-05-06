@@ -1,6 +1,6 @@
 defaults.url=https://sentry.io/
-defaults.org=
-defaults.project=
+defaults.org=o4511342164377600
+defaults.project=com.astrologerondemand.app
 auth.token=
 
 ios.bundle_IDENTIFIER=com.astrologerondemand.app

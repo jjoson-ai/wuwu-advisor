@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { Redirect } from "expo-router";
+import * as Sentry from "@sentry/react-native";
 
 import { getApiBaseUrl } from "@/api/client";
 import { useAuthGateState } from "@/hooks/use-auth-gate";
@@ -218,6 +219,16 @@ export default function SignInScreen() {
             </Pressable>
           ) : null}
 
+          <Pressable
+            onPress={() => {
+              void Sentry.captureMessage("Test crash from sign-in screen");
+              void Sentry.nativeCrash();
+            }}
+            style={[styles.crashButton]}
+          >
+            <Text style={styles.crashButtonText}>Test Crash</Text>
+          </Pressable>
+
           <View style={styles.card}>
             <Text style={styles.label}>Email</Text>
             <TextInput
@@ -406,6 +417,22 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: brandColors.text,
     fontSize: 16,
+    fontWeight: "600",
+  },
+  crashButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: brandRadii.control,
+    backgroundColor: "#D32F2F",
+    borderColor: "#D32F2F",
+    borderWidth: 1,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  crashButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
     fontWeight: "600",
   },
   statusText: {
