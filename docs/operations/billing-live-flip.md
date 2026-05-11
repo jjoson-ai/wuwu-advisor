@@ -25,7 +25,7 @@ In Stripe dashboard, **live mode** (toggle in upper-left):
 
 1. Developers → Webhooks → Add endpoint.
 2. URL: `https://wuwu-advisor.com/api/stripe/webhook`.
-3. Events to send: minimum `checkout.session.completed`, `customer.subscription.deleted`, `invoke.payment_failed`. Add others later as routes are added.
+3. Events to send: minimum `checkout.session.completed`, `customer.subscription.deleted`, `invoice.payment_failed`. Add others later as routes are added. (These three are the exact set the handler in `app/api/stripe/webhook/route.ts` switches on as of writing — if you configure the wrong event names in Stripe, failed-payment access revocation silently never fires.)
 4. **Copy the signing secret** (`whsec_...`). This is what goes into the env var.
 
 ### Step 2: Vercel env

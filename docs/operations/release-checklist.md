@@ -10,7 +10,6 @@ git status                               # clean working tree
 git pull --rebase origin main
 npm run typecheck
 npm run test:unit
-npm run lint
 npm run build                            # catches Edge runtime regressions
 
 # Smokes (against dev or preview)

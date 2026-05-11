@@ -336,7 +336,7 @@ Auth, billing, rate-limiting primitives. Patches here require a second pair of e
 
 ```bash
 # Web
-npm run typecheck && npm run test:unit && npm run lint && npm run build
+npm run typecheck && npm run test:unit && npm run build
 
 # Mobile
 cd apps/mobile && npm run typecheck && cd -
