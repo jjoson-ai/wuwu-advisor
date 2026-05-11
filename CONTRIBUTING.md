@@ -47,9 +47,10 @@ If a patch touches > 2 production files OR > 120 lines, decompose it. This appli
 ```bash
 npm run typecheck
 npm run test:unit
-npm run lint
 npm run build                 # catches Edge runtime regressions
 ```
+
+(There is no `npm run lint` script wired up in `package.json` yet. Adding one — ESLint or Biome — is a tracked follow-up; until then, typecheck + build are the structural gates.)
 
 For changes that touch any file listed in `ARCHITECTURE.md §17` (safety-critical), also run:
 
