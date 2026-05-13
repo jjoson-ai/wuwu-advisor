@@ -17,7 +17,8 @@
     "test:smoke:prod": "playwright test tests/playwright/prod.smoke.spec.ts --config=playwright.prod.config.ts --project=chromium-smoke --headed",
     "verify:alpha": "tsx --env-file-if-exists=.env.local scripts/verify-alpha-readiness.ts",
     "verify:model-pricing": "tsx --env-file-if-exists=.env.local scripts/verify-model-pricing.ts",
-    "verify:cache": "tsx --env-file-if-exists=.env.local scripts/verify-prompt-cache.ts",
+    "verify:cache": "tsx scripts/verify-prompt-cache.ts",
+    "verify:cache:e2e": "tsx scripts/exercise-prompt-cache.ts",
     "test:ux:capture": "WUWU_AUDIT_RUN_ID=${WUWU_AUDIT_RUN_ID:-$(date +%Y%m%d-%H%M%S)} playwright test tests/playwright/ux-audit.capture.spec.ts --project=chromium-audit --project=iphone-audit --headed"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
     "@vitest/ui": "^4.1.5",
+    "dotenv": "^17.4.2",
     "tsx": "^4.21.0",
     "typescript": "^5.8.2",
     "vitest": "^4.1.5"

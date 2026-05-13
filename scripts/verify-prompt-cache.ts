@@ -9,6 +9,9 @@
  *
  * Exits 0 on success, 1 on migration-missing or DB errors.
  */
+// MUST be the first import — populates process.env from .env.local.
+import "./_env";
+
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

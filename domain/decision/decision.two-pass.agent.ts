@@ -140,7 +140,10 @@ export function buildDecisionSignalsRequest(input: DecisionTwoPassInput) {
 // Stable guidance instructions — all invariant lines consolidated before the
 // variable parts (life-stakes, pass mode, tone). At ~1077 tokens this clears
 // the 1024-token minimum for Sonnet 4.6 / Opus 4.7 prompt caching.
-const DECISION_GUIDANCE_CACHED_SYSTEM_BLOCK = [
+//
+// Exported so scripts/exercise-prompt-cache.ts can validate the prefix
+// reaches the cache threshold against the live Anthropic API.
+export const DECISION_GUIDANCE_CACHED_SYSTEM_BLOCK = [
   "Return exactly one JSON object and nothing else.",
   "Do not write markdown, commentary, or extra keys.",
   "You are interpreting structured decision signals into one piece of grounded guidance.",

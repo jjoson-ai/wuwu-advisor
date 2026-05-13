@@ -39,7 +39,10 @@ export type BlueprintOutputDepth = "free" | "full";
 // Placed in cachedSystemBlock so the ~1900-token prefix is shared across users with
 // the same output depth (only 2 cache variants: free / full), saving 90% on
 // cache-hit calls to Opus 4.7 (1024-token minimum cacheable prefix).
-function buildBlueprintCachedSystemBlock(
+//
+// Exported so scripts/exercise-prompt-cache.ts can validate the prefix
+// reaches the cache threshold against the live Anthropic API.
+export function buildBlueprintCachedSystemBlock(
   outputDepth: BlueprintOutputDepth,
 ): string {
   return [
