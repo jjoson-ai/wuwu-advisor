@@ -35,10 +35,13 @@ type BlueprintAgentInput = {
 
 export type BlueprintOutputDepth = "free" | "full";
 
-export function buildBlueprintSystemPrompt(
-  input: DailyBriefingInput,
-  outputDepth: BlueprintOutputDepth = "full",
-) {
+// Stable blueprint instructions — everything except the per-user tone preference.
+// Placed in cachedSystemBlock so the ~1900-token prefix is shared across users with
+// the same output depth (only 2 cache variants: free / full), saving 90% on
+// cache-hit calls to Opus 4.7 (1024-token minimum cacheable prefix).
+function buildBlueprintCachedSystemBlock(
+  outputDepth: BlueprintOutputDepth,
+): string {
   return [
     "Return exactly one JSON object and nothing else.",
     "Do not write markdown, headings outside JSON, bullet points, or commentary.",
@@ -86,7 +89,6 @@ export function buildBlueprintSystemPrompt(
     "Communication and connection should lean more on astrology. Growth edge and long-term pattern should lean more on numerology.",
     "Core pattern may blend multiple modalities, but Chinese astrology should be especially useful for instinctive style and social or family tone, while BaZi should be especially useful for work and money style, discipline, pressure pattern, and deeper structural pattern.",
     "When using BaZi terms, translate them into plain English. Prefer readable phrasing like Jia (Yang Wood) over raw stem names alone.",
-    `Tone preference: ${input.tone_preference}.`,
     "Keep each description compact, specific, and plain-language.",
     "Section headlines may be short labels, but the summary and all section descriptions must still address the user directly as you.",
     "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
@@ -137,7 +139,8 @@ export function buildBlueprintAgentRequest(
     outputDepth === "free" ? FreeBlueprintSchema : BlueprintSchema;
 
   return {
-    systemPrompt: buildBlueprintSystemPrompt(input.briefingInput, outputDepth),
+    cachedSystemBlock: buildBlueprintCachedSystemBlock(outputDepth),
+    systemPrompt: `Tone preference: ${input.briefingInput.tone_preference}.`,
     userPrompt: buildBlueprintUserPrompt(input),
     outputSchema,
     schemaName: "Blueprint",

@@ -205,6 +205,7 @@ export async function POST(request: Request) {
         const blueprintResult = await generateJsonObjectWithMeta({
           provider: blueprintModel.provider,
           model: blueprintModel.model,
+          cachedSystemBlock: blueprintRequest.cachedSystemBlock,
           systemPrompt: blueprintRequest.systemPrompt,
           userPrompt: blueprintRequest.userPrompt,
           stepName: "blueprint generation",

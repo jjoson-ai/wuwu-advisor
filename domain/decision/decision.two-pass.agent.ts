@@ -137,43 +137,52 @@ export function buildDecisionSignalsRequest(input: DecisionTwoPassInput) {
   };
 }
 
-function buildDecisionGuidanceSystemPrompt(
+// Stable guidance instructions — all invariant lines consolidated before the
+// variable parts (life-stakes, pass mode, tone). At ~1077 tokens this clears
+// the 1024-token minimum for Sonnet 4.6 / Opus 4.7 prompt caching.
+const DECISION_GUIDANCE_CACHED_SYSTEM_BLOCK = [
+  "Return exactly one JSON object and nothing else.",
+  "Do not write markdown, commentary, or extra keys.",
+  "You are interpreting structured decision signals into one piece of grounded guidance.",
+  "You must take a stance.",
+  "Do NOT present multiple equal options.",
+  "Do NOT hedge excessively.",
+  "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
+  ...FINANCIAL_SAFETY_RULES,
+  ...CULT_PHRASE_RULES,
+  ...VOICE_DISCIPLINE_RULES,
+  ...LIFE_DECISION_COACH_RULES,
+  "Reject generic phrasing such as 'today is a good day' or 'you may feel'.",
+  "Instead: name the specific tradeoff, the decision posture, and the next move.",
+  "Every statement must map to a specific signal.",
+  "Avoid vague filler.",
+  "Prefer concrete recommendation and timing language.",
+  "Recommendation must be clear and practical.",
+  "Why this fits, timing, and risks must stay tightly tied to the provided signals.",
+].join("\n\n");
+
+function buildDecisionGuidanceVariablePrompt(
   input: DailyBriefingInput,
   pass: GenerationPass,
   lifeStakesDetected: boolean,
-) {
-  const lifeStakesReinforcement = lifeStakesDetected
-    ? [
-        "Deterministic life-stakes signal: this question contains an irreversible life-decision framing. Decision Coach mode is mandatory for this response.",
-        "You must not render a directive verdict on whether to leave, quit, end, stay, break up, move, sell, or disclose. Reflect the tension, surface two or three chart-based considerations, pose three concrete questions for the user to sit with, and name the appropriate human professional for the domain.",
-      ]
-    : [];
+): string {
+  const parts: string[] = [];
 
-  return [
-    "Return exactly one JSON object and nothing else.",
-    "Do not write markdown, commentary, or extra keys.",
-    "You are interpreting structured decision signals into one piece of grounded guidance.",
-    "You must take a stance.",
-    "Do NOT present multiple equal options.",
-    "Do NOT hedge excessively.",
-    "Never mention internal scores, routing metadata, debug fields, hidden system variables, or internal classifier names.",
-    ...FINANCIAL_SAFETY_RULES,
-    ...CULT_PHRASE_RULES,
-    ...VOICE_DISCIPLINE_RULES,
-    ...LIFE_DECISION_COACH_RULES,
-    ...lifeStakesReinforcement,
-    "Reject generic phrasing such as 'today is a good day' or 'you may feel'.",
-    "Instead: name the specific tradeoff, the decision posture, and the next move.",
-    "Every statement must map to a specific signal.",
-    "Avoid vague filler.",
-    "Prefer concrete recommendation and timing language.",
-    "Recommendation must be clear and practical.",
-    "Why this fits, timing, and risks must stay tightly tied to the provided signals.",
+  if (lifeStakesDetected) {
+    parts.push(
+      "Deterministic life-stakes signal: this question contains an irreversible life-decision framing. Decision Coach mode is mandatory for this response.",
+      "You must not render a directive verdict on whether to leave, quit, end, stay, break up, move, sell, or disclose. Reflect the tension, surface two or three chart-based considerations, pose three concrete questions for the user to sit with, and name the appropriate human professional for the domain.",
+    );
+  }
+
+  parts.push(
     pass === "compose"
       ? "Keep the output shorter and simpler than the synthesize pass, but still decisive and grounded."
       : "Use more nuance where the signals support it, but stay concise.",
     `Tone preference: ${input.tone_preference}.`,
-  ].join("\n\n");
+  );
+
+  return parts.join("\n\n");
 }
 
 function buildDecisionGuidanceUserPrompt(input: DecisionGuidanceFromSignalsInput) {
@@ -209,7 +218,8 @@ export function buildDecisionGuidanceRequest(
   pass: GenerationPass,
 ) {
   return {
-    systemPrompt: buildDecisionGuidanceSystemPrompt(
+    cachedSystemBlock: DECISION_GUIDANCE_CACHED_SYSTEM_BLOCK,
+    systemPrompt: buildDecisionGuidanceVariablePrompt(
       input.briefingInput,
       pass,
       isLifeStakesQuestion(input.question),
@@ -268,6 +278,7 @@ async function generateAskGuidanceForPass(
   const result = await generateJsonObjectWithMeta({
     provider: model.provider,
     model: model.model,
+    cachedSystemBlock: request.cachedSystemBlock,
     systemPrompt: request.systemPrompt,
     userPrompt: request.userPrompt,
     structuredOutput: request.structuredOutput,
