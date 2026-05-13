@@ -241,6 +241,12 @@ async function main() {
     if (!hit) allHit = false;
   }
 
+  // logLlmCost is fire-and-forget; the underlying Supabase insert is in
+  // flight when the loop returns. Pause briefly so the last few rows
+  // commit before we exit — otherwise the trailing cost_events rows
+  // are silently dropped on quick CLI runs.
+  await new Promise((r) => setTimeout(r, 3000));
+
   console.log(`\n${"=".repeat(60)}`);
   if (allHit) {
     console.log(
