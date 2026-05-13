@@ -323,8 +323,17 @@ function estimateCostUsd(model: string, usage: LlmUsage | null) {
   const inputCost = (usage.input_tokens / 1_000_000) * pricing.input_per_1m_usd;
   const outputCost =
     (usage.output_tokens / 1_000_000) * pricing.output_per_1m_usd;
+  // Cache-write tokens bill at 1.25x input rate; cache-read tokens at 0.10x.
+  const ccCost =
+    ((usage.cache_creation_input_tokens ?? 0) / 1_000_000) *
+    pricing.input_per_1m_usd *
+    1.25;
+  const crCost =
+    ((usage.cache_read_input_tokens ?? 0) / 1_000_000) *
+    pricing.input_per_1m_usd *
+    0.1;
 
-  return Number((inputCost + outputCost).toFixed(6));
+  return Number((inputCost + outputCost + ccCost + crCost).toFixed(6));
 }
 
 export async function generateJsonObjectWithMeta({

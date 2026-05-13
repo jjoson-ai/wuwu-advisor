@@ -32,6 +32,10 @@ export type CostEventInput = {
   model: string;
   input_tokens?: number | null;
   output_tokens?: number | null;
+  /** Anthropic prompt-cache write tokens (bills at 1.25x input rate). */
+  cache_creation_input_tokens?: number | null;
+  /** Anthropic prompt-cache read tokens (bills at 0.10x input rate). */
+  cache_read_input_tokens?: number | null;
   /** Estimated cost in USD. Null for subscription-priced APIs (FreeAstroAPI). */
   cost_usd?: number | null;
   cost_is_estimated?: boolean;
@@ -72,6 +76,8 @@ async function _insertCostEvent(event: CostEventInput): Promise<void> {
     model: event.model,
     input_tokens: event.input_tokens ?? null,
     output_tokens: event.output_tokens ?? null,
+    cache_creation_input_tokens: event.cache_creation_input_tokens ?? 0,
+    cache_read_input_tokens: event.cache_read_input_tokens ?? 0,
     cost_usd: event.cost_usd ?? null,
     cost_is_estimated: event.cost_is_estimated ?? true,
     duration_ms: event.duration_ms,
@@ -122,6 +128,8 @@ export function logLlmCost(params: {
     model: params.model,
     input_tokens: params.meta.usage?.input_tokens ?? null,
     output_tokens: params.meta.usage?.output_tokens ?? null,
+    cache_creation_input_tokens: params.meta.usage?.cache_creation_input_tokens ?? 0,
+    cache_read_input_tokens: params.meta.usage?.cache_read_input_tokens ?? 0,
     cost_usd: params.meta.estimatedCostUsd ?? null,
     cost_is_estimated: params.meta.costIsEstimated,
     duration_ms: params.meta.duration_ms,
